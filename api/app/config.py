@@ -10,6 +10,7 @@ load_dotenv()
 class Settings:
     groq_api_key: str
     groq_model: str
+    groq_vision_model: str
     max_upload_mb: int
     top_k: int
     database_path: str
@@ -21,6 +22,9 @@ class Settings:
 settings = Settings(
     groq_api_key=os.getenv("GROQ_API_KEY", "").strip(),
     groq_model=os.getenv("GROQ_MODEL", "openai/gpt-oss-120b").strip(),
+    groq_vision_model=os.getenv(
+        "GROQ_VISION_MODEL", "qwen/qwen3.8-27b"
+    ).strip(),
     max_upload_mb=max(1, int(os.getenv("MAX_UPLOAD_MB", "4"))),
     top_k=max(1, min(20, int(os.getenv("TOP_K", "5")))),
     database_path=os.getenv("DATABASE_PATH", "./data/studyrag.db"),

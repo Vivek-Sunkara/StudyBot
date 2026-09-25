@@ -1,3 +1,4 @@
+import base64
 import json
 from groq import Groq
 from .config import settings
@@ -27,6 +28,36 @@ class LLM:
     def __init__(self):
         self.enabled = bool(settings.groq_api_key)
         self.client = Groq(api_key=settings.groq_api_key) if self.enabled else None
+
+    def describe_image(self, data, media_type):
+        if not self.enabled:
+            return None
+        encoded = base64.b64encode(data).decode("ascii")
+        response = self.client.chat.completions.create(
+            model=settings.groq_vision_model,
+            messages=[{
+                "role": "user",
+                "content": [
+                    {
+                        "type": "text",
+                        "text": (
+                            "Describe this image accurately for a study assistant. "
+                            "Identify visible objects, people, setting, actions, "
+                            "text only when clearly readable, and important relationships. "
+                            "Do not guess identities or unreadable details. Return a "
+                            "concise factual description in plain text."
+                        ),
+                    },
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": f"data:{media_type};base64,{encoded}"},
+                    },
+                ],
+            }],
+            temperature=0.1,
+            max_completion_tokens=800,
+        )
+        return response.choices[0].message.content or None
 
     def answer(self, question, language, results, executor, schemas,
                history=None, route="general"):

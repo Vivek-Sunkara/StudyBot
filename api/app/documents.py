@@ -1,6 +1,6 @@
 import io
 import re
-import fitz
+import pymupdf
 from docx import Document
 
 def clean(text):
@@ -26,7 +26,7 @@ def chunks(text, page=1, size=180, overlap=30):
 def extract_document(data, suffix, filename):
     suffix = suffix.lower()
     if suffix == ".pdf":
-        doc = fitz.open(stream=data, filetype="pdf")
+        doc = pymupdf.open(stream=data, filetype="pdf")
         result = []
         for i, page in enumerate(doc):
             result.extend(chunks(page.get_text("text"), i + 1))

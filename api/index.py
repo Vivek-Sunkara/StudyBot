@@ -1,4 +1,5 @@
 import os
+import logging
 import tempfile
 from pathlib import Path
 from typing import Optional
@@ -16,6 +17,8 @@ from api.app.rag import RAG
 from api.app.routing import calculator_expression, classify_query, retrieval_query
 from api.app.tools import execute_tool, TOOL_SCHEMAS
 from api.app.llm import LLM
+
+logger = logging.getLogger(__name__)
 
 app = FastAPI(title="StudyRAG API", version="1.0")
 app.add_middleware(
@@ -111,7 +114,33 @@ async def analyze_image(file: UploadFile = File(...)):
     if len(data) > settings.max_upload_bytes:
         raise HTTPException(413, f"File exceeds {settings.max_upload_mb} MB")
     try:
-        return analyze_image_bytes(data)
+        analysis = analyze_image_bytes(data)
+        description = None
+        vision_error = None
+        if llm.enabled:
+            try:
+                description = llm.describe_image(data, file.content_type or "image/jpeg")
+            except Exception as exc:
+                vision_error = type(exc).__name__
+                logger.exception("Image description request failed")
+            if description:
+                doc_id = db.create_document(file.filename or "image", ".image")
+                db.insert_chunks(doc_id, [{
+                    "page": 0,
+                    "section": "Image description",
+                    "content": description,
+                }])
+                rag.invalidate()
+        analysis["description"] = description
+        analysis["indexed"] = bool(description)
+        analysis["vision_error"] = vision_error
+        analysis["note"] = (
+            "The image description was generated and added to the knowledge base."
+            if description else
+            "Image description is unavailable. Check GROQ_VISION_MODEL and the Groq model access; "
+            "deterministic pixel analysis is still available."
+        )
+        return analysis
     except Exception as exc:
         raise HTTPException(422, str(exc)) from exc
 

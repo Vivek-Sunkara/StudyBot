@@ -15,8 +15,11 @@ The supporting pipeline is deterministic:
 - OpenCV video frame/scene analysis
 - Unicode script detection
 
-An optional Groq LLM is used only for natural-language generation and local calculator
-tool calling. Without a Groq key, deterministic RAG still works.
+An optional Groq LLM is used for natural-language generation, local calculator tool
+calling, and image description. When configured, image descriptions are indexed in
+SQLite and can be used by later RAG questions. Without a Groq key, deterministic RAG
+and pixel-level image analysis still work, but the system cannot identify image
+content or describe objects and scenes.
 
 ## Run
 
@@ -28,6 +31,8 @@ Python 3.12+:
     pip install -r requirements.txt
 
 Copy `.env.example` to `.env` and optionally set `GROQ_API_KEY`.
+For image descriptions, optionally set `GROQ_VISION_MODEL` (the default is
+`qwen/qwen3.8-27b`).
 
 Install Node dependencies:
 
@@ -62,7 +67,14 @@ persistent multi-user data should later be moved to a hosted SQL database.
 
 ## Multimodal boundary
 
-Text and documents are fully searchable. Images and videos receive deterministic
-computer-vision analysis. Because no pretrained vision/speech models are used,
-the system does not pretend to perform arbitrary OCR, speech transcription, or
-human-level visual understanding.
+Text and documents are fully searchable. Images and videos always receive
+deterministic computer-vision analysis. With Groq vision configured, images also
+receive a factual visual description that is added to the knowledge base for RAG.
+The system does not pretend to perform arbitrary OCR, speech transcription, or
+human-level visual understanding, and it does not describe images when the vision
+service is unavailable.
+Images and videos always receive deterministic computer-vision analysis. With Groq
+vision configured, images also receive a factual visual description that is added to
+the knowledge base for RAG. The system does not pretend to perform arbitrary OCR,
+speech transcription, or human-level visual understanding, and it does not describe
+images when the vision service is unavailable.
