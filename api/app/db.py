@@ -87,3 +87,12 @@ class Database:
                 "INSERT INTO messages(conversation_id,role,content) VALUES(?,?,?)",
                 (conversation_id, role, content)
             )
+
+    def get_messages(self, conversation_id, limit=12):
+        with self.conn() as c:
+            rows = c.execute(
+                """SELECT role, content FROM messages
+                   WHERE conversation_id=? ORDER BY id DESC LIMIT ?""",
+                (conversation_id, limit),
+            ).fetchall()
+        return list(reversed([dict(row) for row in rows]))

@@ -4,9 +4,20 @@ from .config import settings
 
 SYSTEM = """
 You are StudyRAG, a careful multilingual study assistant.
-Use supplied knowledge when relevant. Never invent source/page citations.
-If the supplied knowledge is insufficient, say so.
-Reply in the user's language when practical.
+Treat the supplied knowledge as private source notes, not as text to repeat.
+Understand the user's question first, then answer it directly in your own words.
+Synthesize and paraphrase the relevant facts instead of returning whole chunks,
+lists of chunks, or a near-verbatim copy. Quote the source only when the user
+explicitly asks for a quotation. Cite factual document claims with the matching
+[SOURCE n] marker, and never invent source/page citations or document facts.
+For explanation and teaching requests, use the supplied knowledge as the
+foundation, then explain, simplify, organize, or expand it and provide clearly
+labeled logical examples. Do not require every example or explanatory detail to
+appear verbatim in the source. Say information is unavailable only when the
+specific requested fact cannot be determined.
+Before responding, silently proofread the complete answer for spelling,
+grammar, punctuation, and clear wording. Correct mistakes without changing the
+meaning or the user's language. Reply in the user's language when practical.
 Use the calculate tool for arithmetic.
 Do not claim that classical image/video analysis performs OCR, speech recognition,
 or general human-level visual understanding.
@@ -17,17 +28,24 @@ class LLM:
         self.enabled = bool(settings.groq_api_key)
         self.client = Groq(api_key=settings.groq_api_key) if self.enabled else None
 
-    def answer(self, question, language, results, executor, schemas):
+    def answer(self, question, language, results, executor, schemas,
+               history=None, route="general"):
         context = "\n\n".join(
             f"[SOURCE {i}] {x['document']} | page {x['page']}\n{x['content']}"
             for i, x in enumerate(results, 1)
         )
-        messages = [
-            {"role": "system", "content": SYSTEM},
-            {"role": "user", "content":
-                f"Language: {language}\n\nKnowledge:\n{context or '[none]'}"
-                f"\n\nQuestion:\n{question}"}
-        ]
+        route_instruction = {
+            "conversation": "Respond naturally as a conversational assistant; do not claim document information was missing.",
+            "calculator": "Use the calculate tool for the arithmetic request and explain the result briefly.",
+            "document": "Synthesize a direct answer from the supplied document context in your own words and cite only the supplied sources.",
+            "explanation": "Teach the topic in your own words using the supplied context as grounding. Examples must be logical illustrations, not invented document claims.",
+            "general": "Answer normally. Use the supplied context only when it is relevant to the question.",
+        }[route]
+        messages = [{"role": "system", "content": SYSTEM}]
+        messages.extend(history or [])
+        messages.append({"role": "user", "content":
+            f"Language: {language}\nRoute: {route_instruction}\n\nKnowledge:\n{context or '[none]'}"
+            f"\n\nQuestion:\n{question}"})
         logs = []
         for _ in range(3):
             r = self.client.chat.completions.create(

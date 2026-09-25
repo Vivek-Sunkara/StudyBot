@@ -13,6 +13,7 @@ from api.app.documents import extract_document
 from api.app.images import analyze_image_bytes
 from api.app.language import detect_script
 from api.app.rag import RAG
+from api.app.routing import calculator_expression, classify_query, retrieval_query
 from api.app.tools import execute_tool, TOOL_SCHEMAS
 from api.app.llm import LLM
 
@@ -62,16 +63,35 @@ async def upload_document(file: UploadFile = File(...)):
 @app.post("/api/chat")
 def chat(req: ChatRequest):
     lang = detect_script(req.message)
-    results = rag.search(req.message)
+    history = db.get_messages(req.conversation_id) if req.conversation_id else []
+    route = classify_query(req.message, bool(history))
+    results = rag.search(retrieval_query(req.message, history, route)) \
+        if route not in {"conversation", "calculator"} else []
     if llm.enabled:
         try:
-            answer, calls = llm.answer(req.message, lang, results, execute_tool, TOOL_SCHEMAS)
+            answer, calls = llm.answer(
+                req.message, lang, results, execute_tool, TOOL_SCHEMAS,
+                history=history, route=route,
+            )
             mode = "groq+local-rag"
         except Exception:
-            answer, calls = rag.fallback(req.message, results, lang), []
+            if route == "conversation":
+                answer = "Hello! I can help you study, explain concepts, and work with your uploaded notes."
+            elif route == "calculator":
+                answer = "I could not complete the calculation safely."
+            else:
+                answer = rag.fallback(req.message, results, lang)
+            calls = []
             mode = "local-rag-fallback"
     else:
-        answer, calls = rag.fallback(req.message, results, lang), []
+        if route == "calculator":
+            answer, calls = "Calculator requests require a configured language model.", []
+        elif route == "conversation":
+            answer, calls = "Hello! I can help you study, explain concepts, and work with your uploaded notes.", []
+        elif route in {"document", "explanation"}:
+            answer, calls = rag.fallback(req.message, results, lang), []
+        else:
+            answer, calls = rag.fallback(req.message, results, lang), []
         mode = "local-rag"
     if req.conversation_id:
         db.add_message(req.conversation_id, "user", req.message)

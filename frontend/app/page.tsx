@@ -12,6 +12,7 @@ export default function Home() {
   const [input,setInput] = useState("");
   const [busy,setBusy] = useState(false);
   const [status,setStatus] = useState("Ready");
+  const conversationId = useRef<string>(crypto.randomUUID());
   const docs = useRef<HTMLInputElement>(null);
   const image = useRef<HTMLInputElement>(null);
   const video = useRef<HTMLInputElement>(null);
@@ -23,7 +24,7 @@ export default function Home() {
     setMessages(m=>[...m,{role:"user",content:text}]);
     setInput(""); setBusy(true); setStatus("Retrieving...");
     try {
-      const r=await fetch("/api/chat",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({message:text})});
+      const r=await fetch("/api/chat",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({message:text,conversation_id:conversationId.current})});
       const d=await r.json(); if(!r.ok)throw new Error(d.detail||"Request failed");
       setMessages(m=>[...m,{role:"assistant",content:d.answer,sources:d.sources}]);
       setStatus(d.mode);

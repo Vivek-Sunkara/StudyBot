@@ -3,9 +3,15 @@ import re
 from collections import Counter
 
 TOKEN_RE = re.compile(r"[^\W_]+(?:['’-][^\W_]+)*", re.UNICODE)
+STOP_WORDS = frozenset(
+    "a an and are as at be but by can could did do does for from give has have how "
+    "i if in is it me more of on or say should tell that the their them this to was "
+    "what when where which who why with you your".split()
+)
 
 def tokenize(text):
-    return [x.lower() for x in TOKEN_RE.findall(text)]
+    return [x.lower() for x in TOKEN_RE.findall(text)
+            if x.lower() not in STOP_WORDS]
 
 class RAG:
     def __init__(self, db, top_k=5):
@@ -64,11 +70,32 @@ class RAG:
             if language == "Hindi":
                 return "इस प्रश्न से संबंधित जानकारी Knowledge Base में नहीं मिली।"
             return "I could not find sufficiently relevant information in the knowledge base."
+        query_terms = set(tokenize(query))
+        relevant = []
+        for result in results:
+            sentences = [part.strip() for part in re.split(
+                r"(?<=[.!?])\s+|\n+", result["content"]
+            ) if part.strip()]
+            ranked = sorted(
+                sentences,
+                key=lambda sentence: len(query_terms.intersection(tokenize(sentence))),
+                reverse=True,
+            )
+            selected = [sentence for sentence in ranked[:2]
+                        if query_terms.intersection(tokenize(sentence))]
+            if selected:
+                relevant.append((result, selected))
+        if not relevant:
+            if language == "Telugu":
+                return "మీ ప్రశ్నకు సంబంధించిన సమాచారం Knowledge Base లో దొరకలేదు."
+            if language == "Hindi":
+                return "इस प्रश्न से संबंधित जानकारी Knowledge Base में नहीं मिली।"
+            return "I could not find sufficiently relevant information in the knowledge base."
         intro = {
             "Telugu": "Knowledge Base నుండి లభించిన సంబంధిత సమాచారం:",
             "Hindi": "Knowledge Base से मिली संबंधित जानकारी:",
         }.get(language, "Relevant information retrieved from the knowledge base:")
         return intro + "\n\n" + "\n\n".join(
-            f"[{i}] {x['document']} (page {x['page']}): {x['content']}"
-            for i, x in enumerate(results, 1)
+            f"[{i}] {result['document']} (page {result['page']}): {' '.join(sentences)}"
+            for i, (result, sentences) in enumerate(relevant, 1)
         )
