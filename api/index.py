@@ -9,12 +9,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from api.app.config import settings
-from api.app.db import Database
+from api.app.db import Database, MongoDatabase
 from api.app.documents import extract_document
 from api.app.images import analyze_image_bytes
 from api.app.language import detect_script
 from api.app.rag import RAG
-from api.app.routing import calculator_expression, classify_query, retrieval_query
+from api.app.routing import calculator_expression, classify_query, retrieval_query, requests_document_summary, requested_media_kind
 from api.app.tools import execute_tool, TOOL_SCHEMAS
 from api.app.llm import LLM
 
@@ -27,13 +27,16 @@ app.add_middleware(
     allow_methods=["*"], allow_headers=["*"]
 )
 
-db = Database(settings.database_path)
+db = MongoDatabase(settings.mongodb_uri, settings.mongodb_database) if settings.mongodb_uri else Database(settings.database_path)
 rag = RAG(db, settings.top_k)
 llm = LLM()
 
 class ChatRequest(BaseModel):
     message: str = Field(min_length=1, max_length=12000)
     conversation_id: Optional[str] = None
+
+class RenameRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=160)
 
 @app.get("/api/health")
 def health():
@@ -43,6 +46,47 @@ def health():
 @app.get("/api/documents")
 def documents():
     return db.list_documents()
+
+@app.get("/api/library")
+def library():
+    return db.list_documents()
+
+@app.patch("/api/library/{document_id}")
+def rename_library_item(document_id: str, req: RenameRequest):
+    try:
+        name = req.name.strip()
+        if not name or not db.rename_document(document_id, name):
+            raise HTTPException(404, "Library item not found")
+        rag.invalidate()
+        return {"ok": True}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(404, "Library item not found") from exc
+
+@app.delete("/api/library/{document_id}")
+def delete_library_item(document_id: str):
+    try:
+        db.delete_document(document_id)
+        rag.invalidate()
+        return {"ok": True}
+    except Exception as exc:
+        raise HTTPException(404, "Library item not found") from exc
+
+@app.get("/api/chats")
+def chats():
+    return db.list_conversations()
+
+@app.get("/api/chats/{conversation_id}")
+def chat_history(conversation_id: str):
+    return {"id": conversation_id, "messages": db.get_messages(conversation_id, limit=1000)}
+
+@app.patch("/api/chats/{conversation_id}")
+def rename_chat(conversation_id: str, req: RenameRequest):
+    name = req.name.strip()
+    if not name or not db.rename_conversation(conversation_id, name):
+        raise HTTPException(404, "Chat not found")
+    return {"ok": True}
 
 @app.post("/api/documents")
 async def upload_document(file: UploadFile = File(...)):
@@ -56,7 +100,7 @@ async def upload_document(file: UploadFile = File(...)):
         chunks = extract_document(data, suffix, file.filename or "document")
         if not chunks:
             raise ValueError("No readable text found")
-        doc_id = db.create_document(file.filename or "document", suffix)
+        doc_id = db.create_document(file.filename or "document", suffix, "document", data)
         db.insert_chunks(doc_id, chunks)
         rag.invalidate()
         return {"ok": True, "document_id": doc_id, "chunks": len(chunks)}
@@ -68,7 +112,10 @@ def chat(req: ChatRequest):
     lang = detect_script(req.message)
     history = db.get_messages(req.conversation_id) if req.conversation_id else []
     route = classify_query(req.message, bool(history))
-    results = rag.search(retrieval_query(req.message, history, route)) \
+    media_kind = requested_media_kind(req.message)
+    results = rag.search(retrieval_query(req.message, history, route),
+                         include_all=requests_document_summary(req.message),
+                         kinds={media_kind} if media_kind else None) \
         if route not in {"conversation", "calculator"} else []
     if llm.enabled:
         try:
@@ -124,7 +171,7 @@ async def analyze_image(file: UploadFile = File(...)):
                 vision_error = type(exc).__name__
                 logger.exception("Image description request failed")
             if description:
-                doc_id = db.create_document(file.filename or "image", ".image")
+                doc_id = db.create_document(file.filename or "image", ".image", "image", data)
                 db.insert_chunks(doc_id, [{
                     "page": 0,
                     "section": "Image description",
@@ -140,6 +187,8 @@ async def analyze_image(file: UploadFile = File(...)):
             "Image description is unavailable. Check GROQ_VISION_MODEL and the Groq model access; "
             "deterministic pixel analysis is still available."
         )
+        if not description:
+            db.create_document(file.filename or "image", Path(file.filename or "image").suffix.lower() or ".image", "image", data)
         return analysis
     except Exception as exc:
         raise HTTPException(422, str(exc)) from exc
@@ -155,8 +204,25 @@ async def analyze_video(file: UploadFile = File(...)):
         with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as f:
             f.write(data)
             temp = f.name
-        from api.app.video import analyze_video_file
-        return analyze_video_file(temp)
+        from api.app.video import analyze_video_file, sample_video_frames
+        result = analyze_video_file(temp)
+        descriptions = llm.describe_video_frames(sample_video_frames(temp)) if llm.enabled else []
+        video_id = db.create_document(file.filename or "video", suffix, "video", data)
+        summary = (
+            f"Video file {file.filename or 'video'}. Duration: {result['duration_seconds']} seconds. "
+            f"Resolution: {result['width']}x{result['height']}. FPS: {result['fps']}. "
+            f"Sampled {len(result['sampled_frames'])} frames for brightness, edge density, and scene changes."
+        )
+        if descriptions:
+            summary += " Visual descriptions from representative frames:\n" + "\n".join(descriptions)
+        else:
+            summary += " No vision description was available; deterministic analysis does not identify objects, speech, or actions."
+        db.insert_chunks(video_id, [{"page": 0, "section": "Video analysis", "content": summary}])
+        rag.invalidate()
+        result["description"] = "\n".join(descriptions) if descriptions else None
+        result["indexed"] = True
+        result["note"] = "Video analysis and representative-frame descriptions were added to the knowledge base." if descriptions else "Video analysis was added, but visual descriptions require GROQ_API_KEY."
+        return result
     except Exception as exc:
         raise HTTPException(422, str(exc)) from exc
     finally:

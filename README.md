@@ -30,7 +30,7 @@ Python 3.12+:
     # Linux/macOS: source .venv/bin/activate
     pip install -r requirements.txt
 
-Copy `.env.example` to `.env` and optionally set `GROQ_API_KEY`.
+Copy `.env.example` to `.env` and set `MONGODB_URI` and `MONGODB_DATABASE` for persistent library and chat data. You may also set `GROQ_API_KEY`.
 For image descriptions, optionally set `GROQ_VISION_MODEL` (the default is
 `qwen/qwen3.8-27b`).
 
@@ -55,15 +55,16 @@ Or use Vercel locally so frontend and FastAPI share one origin:
 
 ## Deployment
 
-Vercel can deploy Next.js and FastAPI together. Set `GROQ_API_KEY` and `GROQ_MODEL`
-as Vercel environment variables.
+Vercel can deploy Next.js and FastAPI together. Set `MONGODB_URI`, `MONGODB_DATABASE`,
+`GROQ_API_KEY`, and `GROQ_MODEL` as Vercel environment variables. Add the deployment
+network access rule in MongoDB Atlas.
 
 The included 4 MB upload limit is deliberate because serverless request payloads
 are constrained. For large production video uploads, use direct object storage and
 asynchronous processing.
 
-SQLite is included for a self-contained project. On serverless infrastructure,
-persistent multi-user data should later be moved to a hosted SQL database.
+SQLite is retained as a local fallback when `MONGODB_URI` is not set. MongoDB stores
+documents, images, videos, and previous chat sessions for deployed environments.
 
 ## Multimodal boundary
 

@@ -59,6 +59,17 @@ class LLM:
         )
         return response.choices[0].message.content or None
 
+    def describe_video_frames(self, frames):
+        descriptions = []
+        for frame_number, data in frames:
+            try:
+                description = self.describe_image(data, "image/jpeg")
+                if description:
+                    descriptions.append(f"Frame {frame_number}: {description}")
+            except Exception:
+                continue
+        return descriptions
+
     def answer(self, question, language, results, executor, schemas,
                history=None, route="general"):
         context = "\n\n".join(

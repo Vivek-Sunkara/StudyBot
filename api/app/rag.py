@@ -35,17 +35,21 @@ class RAG:
         self.avg_len = sum(lengths) / len(lengths) if lengths else 1
         self.ready = True
 
-    def search(self, query):
+    def search(self, query, include_all=False, kinds=None):
         if not self.ready:
             self.build()
         if not self.docs:
             return []
+        candidates = [document for document in self.docs
+                      if not kinds or document.get("kind", "document") in kinds]
+        if include_all:
+            return [dict(document, score=1.0) for document in candidates[:self.top_k]]
         q = set(tokenize(query))
-        n = len(self.docs)
+        n = len(candidates)
         scored = []
         k1, b = 1.5, 0.75
-        for i, d in enumerate(self.docs):
-            tf = self.tfs[i]
+        for d in candidates:
+            tf = Counter(tokenize(d["content"]))
             length = sum(tf.values())
             score = 0.0
             for term in q:

@@ -19,6 +19,12 @@ CALCULATOR_RE = re.compile(
 DOCUMENT_RE = re.compile(
     r"\b(?:document|notes?|material|uploaded|source|according to|"
     r"in the (?:text|file|document))\b", re.IGNORECASE)
+SUMMARY_RE = re.compile(
+    r"\b(?:summar(?:y|ize|ise|ized|ised)|overview|give me the gist)\b",
+    re.IGNORECASE,
+)
+VIDEO_RE = re.compile(r"\b(?:video|clip|footage|recording)\b", re.IGNORECASE)
+IMAGE_RE = re.compile(r"\b(?:image|picture|photo|diagram|figure)\b", re.IGNORECASE)
 
 
 def classify_query(query, has_history=False):
@@ -44,6 +50,16 @@ def retrieval_query(query, history, route):
         if previous_user:
             return f"{previous_user}\n{query}"
     return query
+
+def requests_document_summary(query):
+    return bool(SUMMARY_RE.search(query) and DOCUMENT_RE.search(query))
+
+def requested_media_kind(query):
+    if VIDEO_RE.search(query):
+        return "video"
+    if IMAGE_RE.search(query):
+        return "image"
+    return None
 
 def calculator_expression(query):
     match = re.search(r"(?:calculate|compute|evaluate|what is)\s+(.+?)(?:\?|$)", query, re.IGNORECASE)

@@ -4,7 +4,8 @@ import { useEffect, useRef, useState } from "react";
 
 type Source = {document:string;page:number;score:number;chunk_id:number};
 type Message = {role:"user"|"assistant";content:string;sources?:Source[];time:string;media?:{type:string;url:string;name:string}[]};
-type KnowledgeDocument = {id:number;filename:string;file_type:string;chunks:number};
+type KnowledgeDocument = {id:number|string;filename:string;file_type:string;kind:string;chunks:number;created_at?:string};
+type Conversation = {id:string;title:string;message_count:number;updated_at:string};
 type Theme = "light"|"dark";
 
 type IconName = "chat"|"document"|"image"|"video"|"calculator"|"settings"|"attach"|"send"|"play"|"list"|"sparkle";
@@ -35,22 +36,50 @@ export default function Home() {
   const [busy,setBusy] = useState(false);
   const [status,setStatus] = useState("Ready to explore");
   const [documents,setDocuments] = useState<KnowledgeDocument[]>([]);
+  const [chats,setChats] = useState<Conversation[]>([]);
+  const [view,setView] = useState<"chat"|"dashboard">("chat");
+  const [editingKey,setEditingKey] = useState<string|null>(null);
+  const [editingName,setEditingName] = useState("");
   const [theme,setTheme] = useState<Theme>("dark");
   const [isMobile,setIsMobile] = useState(false);
   const conversationId = useRef<string>(crypto.randomUUID());
   const docs = useRef<HTMLInputElement>(null);
   const image = useRef<HTMLInputElement>(null);
   const video = useRef<HTMLInputElement>(null);
+  const dashboardDocs = useRef<HTMLInputElement>(null);
+  const dashboardImages = useRef<HTMLInputElement>(null);
+  const dashboardVideos = useRef<HTMLInputElement>(null);
 
   const now=()=>new Date().toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"});
   const focusChat=()=>document.querySelector(".chat")?.scrollIntoView({behavior:"smooth",block:"center"});
-  const newChat=()=>{setMessages([]);setInput("");setStatus("New study session");focusChat();};
+  const newChat=()=>{conversationId.current=crypto.randomUUID();setMessages([]);setInput("");setView("chat");setStatus("New study session");focusChat();};
 
   function toggleTheme() {
     setTheme(current=>{const next=current==="dark"?"light":"dark";document.documentElement.dataset.theme=next;localStorage.setItem("studyrag-theme",next);return next;});
   }
 
   async function refreshKnowledge() { const response=await fetch("/api/documents");if(response.ok)setDocuments(await response.json()); }
+  async function refreshChats() { const response=await fetch("/api/chats");if(response.ok)setChats(await response.json()); }
+  async function openChat(id:string) {
+    const response=await fetch(`/api/chats/${id}`); if(!response.ok)return;
+    const data=await response.json(); conversationId.current=id; setMessages(data.messages.map((m:{role:"user"|"assistant";content:string},i:number)=>({...m,time:`History ${i+1}`}))); setView("chat");
+  }
+  function beginRename(item:KnowledgeDocument|Conversation, type:"library"|"chat") {
+    const name=type === "library" ? (item as KnowledgeDocument).filename : (item as Conversation).title;
+    setEditingKey(`${type}:${item.id}`);setEditingName(name);
+  }
+  async function renameItem(item:KnowledgeDocument|Conversation, type:"library"|"chat") {
+    const name=editingName.trim();
+    if(!name){setStatus("Name cannot be empty");return;}
+    const response=await fetch(`/api/${type === "library" ? "library" : "chats"}/${item.id}`,{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify({name})});
+    if(!response.ok){const data=await response.json().catch(()=>({}));setStatus(data.detail||"Rename failed");return;}
+    setEditingKey(null);setEditingName("");setStatus("Renamed successfully");
+    await (type === "library" ? refreshKnowledge() : refreshChats());
+  }
+  async function deleteItem(item:KnowledgeDocument) {
+    if(!window.confirm(`Delete ${item.filename}?`))return;
+    await fetch(`/api/library/${item.id}`,{method:"DELETE"}); await refreshKnowledge();
+  }
 
   async function chat(e:React.FormEvent) {
     e.preventDefault(); const text=input.trim(); if(!text||busy)return;
@@ -58,12 +87,12 @@ export default function Home() {
     try {
       const response=await fetch("/api/chat",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({message:text,conversation_id:conversationId.current})});
       const data=await response.json();if(!response.ok)throw new Error(data.detail||"Request failed");
-      setMessages(m=>[...m,{role:"assistant",content:data.answer,sources:data.sources,time:now()}]);setStatus(data.mode==="groq+local-rag"?"Grounded response ready":"Local knowledge response ready");
+      setMessages(m=>[...m,{role:"assistant",content:data.answer,sources:data.sources,time:now()}]);setStatus(data.mode==="groq+local-rag"?"Grounded response ready":"Local knowledge response ready");await refreshChats();
     } catch(err) {setMessages(m=>[...m,{role:"assistant",content:String(err),time:now()}]);setStatus("Connection issue");}
     finally {setBusy(false);}
   }
 
-  async function upload(file:File, endpoint:string) {
+  async function upload(file:File, endpoint:string, showInChat=true) {
     if(file.size>LIMIT*1024*1024){setStatus(`Maximum file size is ${LIMIT} MB`);return;}
     setBusy(true);setStatus(`Reading ${file.name}...`);
     try {
@@ -71,7 +100,7 @@ export default function Home() {
       const content=endpoint.endsWith("documents")?`${file.name} is now searchable in your study space. ${data.chunks} knowledge chunks indexed.`:endpoint.endsWith("image")?(data.description||data.note):data.note;
       const mediaType = endpoint.endsWith("documents")?"document":endpoint.endsWith("image")?"image":"video";
       const mediaUrl = URL.createObjectURL(file);
-      setMessages(m=>[...m,{role:"assistant",content,time:now(),media:[{type:mediaType,url:mediaUrl,name:file.name}]}]);setStatus(endpoint.endsWith("documents")?"Document indexed":endpoint.endsWith("image")?(data.indexed?"Image understood and indexed":"Image diagnostics ready"):"Video analysis ready");await refreshKnowledge();
+      if(showInChat)setMessages(m=>[...m,{role:"assistant",content,time:now(),media:[{type:mediaType,url:mediaUrl,name:file.name}]}]);setStatus(endpoint.endsWith("documents")?"Document indexed":endpoint.endsWith("image")?(data.indexed?"Image understood and indexed":"Image diagnostics ready"):"Video analysis ready");await refreshKnowledge();await refreshChats();
     } catch(err){setStatus(String(err));} finally{setBusy(false);}
   }
 
@@ -84,21 +113,24 @@ export default function Home() {
     checkMobile();
     window.addEventListener("resize", checkMobile);
     
-    Promise.all([fetch("/api/health"),fetch("/api/documents")]).then(async ([health,docsResponse])=>{const data=await health.json();if(docsResponse.ok)setDocuments(await docsResponse.json());setStatus(`Ready · ${data.documents} documents · ${data.chunks} chunks`);}).catch(()=>setStatus("Backend unavailable"));
+    Promise.all([fetch("/api/health"),fetch("/api/documents"),fetch("/api/chats")]).then(async ([health,docsResponse,chatsResponse])=>{const data=await health.json();if(docsResponse.ok)setDocuments(await docsResponse.json());if(chatsResponse.ok)setChats(await chatsResponse.json());setStatus(`Ready · ${data.documents} documents · ${data.chunks} chunks`);}).catch(()=>setStatus("Backend unavailable"));
     
     return () => window.removeEventListener("resize", checkMobile);
   },[]);
 
-  const getGreeting = () => {
-    const hour = new Date().getHours();
-    if (hour < 12) return "Good Morning! 🌅";
-    if (hour < 17) return "Good Afternoon! ☀️";
-    return "Good Evening! 🌙";
-  };
+  const getGreeting = () => "Let's study something new.";
 
+  const libraryGroups=["document","image","video"] as const;
   return <main className="app-shell">
-    <aside className="sidebar"><div className="sidebar-brand"><div className="logo-orbit"><span>S</span></div><div><strong>StudyRAG</strong><small>Midnight Scholar</small></div></div><button className="new-chat" onClick={newChat}><span>＋</span> New chat</button><nav className="nav-group" aria-label="StudyRAG navigation"><span className="nav-label">Workspace</span><button className="nav-item active" onClick={focusChat}><span><Icon name="chat"/></span> Chat <kbd>⌘ 1</kbd></button><button className="nav-item" onClick={()=>document.querySelector(".document-list")?.scrollIntoView({behavior:"smooth"})}><span><Icon name="document"/></span> Documents <em>{documents.length}</em></button><button className="nav-item" onClick={()=>image.current?.click()}><span><Icon name="image"/></span> Images</button><button className="nav-item" onClick={()=>video.current?.click()}><span><Icon name="video"/></span> Videos</button><button className="nav-item" onClick={()=>{setInput("Calculate ");focusChat()}}><span><Icon name="calculator"/></span> Calculator</button></nav><div className="sidebar-history"><span className="nav-label">Recent chats</span><button className="history-item active-history" onClick={focusChat}><span><Icon name="chat"/></span> <span>Current study session</span></button><span className="history-date">Today</span></div><div className="sidebar-bottom"><button className="nav-item" onClick={()=>setStatus("Settings are ready in this workspace")}><span><Icon name="settings"/></span> Settings</button><div className="profile"><div className="profile-avatar">S</div><div><strong>Study student</strong><small>{status}</small></div></div></div></aside>
-    <section className="workspace"><header className="workspace-header"><div style={{visibility:"hidden"}}><span className="live-dot"></span><span className="header-status">AI study space</span></div><button className="theme-toggle" onClick={toggleTheme} aria-label={`Switch to ${theme==="dark"?"light":"dark"} mode`} title={`Switch to ${theme==="dark"?"light":"dark"} mode`}><span className="sun-icon">☀️</span><span className="moon-icon">🌙</span><span className="eclipse"><i></i></span></button></header><div className="conversation chat">
+    <aside className="sidebar"><div className="sidebar-brand"><div className="logo-orbit"><span>S</span></div><div><strong>StudyRAG</strong><small>Midnight Scholar</small></div></div><button className="new-chat" onClick={newChat}><span>＋</span> New chat</button><nav className="nav-group" aria-label="StudyRAG navigation"><span className="nav-label">Workspace</span><button className={`nav-item ${view==="chat"?"active":""}`} onClick={()=>{setView("chat");focusChat()}}><span><Icon name="chat"/></span> Chat <kbd>⌘ 1</kbd></button><button className={`nav-item ${view==="dashboard"?"active":""}`} onClick={()=>setView("dashboard")}><span><Icon name="document"/></span> Library <em>{documents.length}</em></button></nav><div className="sidebar-history"><span className="nav-label">Recent chats</span>{chats.slice(0,5).map(chat=><button className="history-item" key={chat.id} onClick={()=>openChat(chat.id)}><span><Icon name="chat"/></span> <span>{chat.title}</span></button>)}</div><div className="sidebar-bottom"><div className="profile"><div className="profile-avatar">S</div><div><strong>Study student</strong><small>{status}</small></div></div></div></aside>
+    <section className="workspace"><header className="workspace-header"><div style={{visibility:"hidden"}}><span className="live-dot"></span><span className="header-status">AI study space</span></div><button className="theme-toggle" onClick={toggleTheme} aria-label={`Switch to ${theme==="dark"?"light":"dark"} mode`} title={`Switch to ${theme==="dark"?"light":"dark"} mode`}><span className="sun-icon">☀️</span><span className="moon-icon">🌙</span><span className="eclipse"><i></i></span></button></header>
+      {view==="dashboard"&&<section className="dashboard-panel">
+        <div className="dashboard-heading"><div><span className="nav-label">Workspace</span><h1>Study library</h1><p>Manage your study materials and return to any conversation.</p></div><button className="new-chat" onClick={newChat}>＋ New chat</button></div>
+        <div className="dashboard-grid"><section className="dashboard-section"><div className="section-heading"><div><h2>Library</h2><p>{documents.length} uploaded items</p></div><div className="library-add"><button className="icon-button" onClick={()=>dashboardDocs.current?.click()} title="Add document" aria-label="Add document"><Icon name="document"/></button><button className="icon-button" onClick={()=>dashboardImages.current?.click()} title="Add image" aria-label="Add image"><Icon name="image"/></button><button className="icon-button" onClick={()=>dashboardVideos.current?.click()} title="Add video" aria-label="Add video"><Icon name="video"/></button></div></div>
+          <div className="library-list">{libraryGroups.map(kind=><div className="library-group" key={kind}><h3><Icon name={kind}/>{kind}s</h3>{documents.filter(item=>item.kind===kind).map(item=>{const key=`library:${item.id}`;return <div className="library-item" key={String(item.id)}><span className="library-item-icon"><Icon name={kind}/></span><div>{editingKey===key?<input className="rename-input" value={editingName} onChange={e=>setEditingName(e.target.value)} onKeyDown={e=>{if(e.key==="Enter")renameItem(item,"library");if(e.key==="Escape")setEditingKey(null)}} autoFocus/>:<><strong>{item.filename}</strong><small>{kind === "document" ? `${item.chunks} chunks` : "Uploaded media"}</small></>}</div>{editingKey===key?<><button className="icon-button" onClick={()=>renameItem(item,"library")} title="Save name" aria-label="Save name">✓</button><button className="icon-button" onClick={()=>setEditingKey(null)} title="Cancel" aria-label="Cancel rename">×</button></>:<><button className="icon-button" onClick={()=>beginRename(item,"library")} title="Rename" aria-label={`Rename ${item.filename}`}>✎</button><button className="icon-button danger" onClick={()=>deleteItem(item)} title="Delete" aria-label={`Delete ${item.filename}`}>×</button></>}</div>})}{!documents.some(item=>item.kind===kind)&&<p className="empty-state">No {kind}s uploaded yet.</p>}</div>)}</div>
+        </section><section className="dashboard-section"><div className="section-heading"><div><h2>Previous chats</h2><p>Open or rename a study session</p></div></div><div className="chat-history-list">{chats.map(chat=>{const key=`chat:${chat.id}`;return <div className="library-item" key={chat.id}><span className="library-item-icon"><Icon name="chat"/></span><div>{editingKey===key?<input className="rename-input" value={editingName} onChange={e=>setEditingName(e.target.value)} onKeyDown={e=>{if(e.key==="Enter")renameItem(chat,"chat");if(e.key==="Escape")setEditingKey(null)}} autoFocus/>:<><strong>{chat.title}</strong><small>{chat.message_count} messages</small></>}</div>{editingKey===key?<><button className="icon-button" onClick={()=>renameItem(chat,"chat")} title="Save name" aria-label="Save name">✓</button><button className="icon-button" onClick={()=>setEditingKey(null)} title="Cancel" aria-label="Cancel rename">×</button></>:<><button className="icon-button" onClick={()=>openChat(chat.id)} title="Open chat" aria-label={`Open ${chat.title}`}><Icon name="chat"/></button><button className="icon-button" onClick={()=>beginRename(chat,"chat")} title="Rename" aria-label={`Rename ${chat.title}`}>✎</button></>}</div>})}{!chats.length&&<p className="empty-state">No previous chats yet.</p>}</div></section></div>
+      </section>}
+      <div className={`conversation chat ${view==="dashboard"?"dashboard-hidden":""}`}>
       {!messages.length&&<section className="welcome">
         <div style={{marginBottom: "16px", display: "flex", alignItems: "center", justifyContent: "center"}}>
           <div className="welcome-orb" style={{
@@ -124,7 +156,7 @@ export default function Home() {
       </section>}
       {messages.map((message,index)=><article className={`message ${message.role}`} key={`${message.time}-${index}`}><div className="message-head"><div className="message-avatar">{message.role==="assistant"?"S":"Y"}</div><div><b>{message.role==="assistant"?"StudyRAG":"You"}</b><time>{message.time}</time></div></div>{message.media?.length?<div className="message-media">{message.media.map((m,i)=>m.type==="document"?<div className="media-item document-preview" key={i}><div className="doc-icon"><Icon name="document"/></div><div className="doc-info"><strong>{m.name}</strong><small>Document</small></div></div>:m.type==="image"?<div className="media-item image-preview" key={i}><img src={m.url} alt={m.name} /><div className="media-label">{m.name}</div></div>:<div className="media-item video-preview" key={i}><div className="video-placeholder"><Icon name="play"/></div><div className="media-label">{m.name}</div></div>)}</div>:null}<div className="message-copy">{message.content}</div>{message.sources?.length?<div className="sources"><div className="sources-heading">Grounded sources</div>{message.sources.map(source=><div className="source-item" key={source.chunk_id}><span className="source-file"><Icon name="document"/></span><div><strong>{source.document}</strong><small>Page {source.page} · relevance {source.score}</small></div></div>)}</div>:null}</article>)}
       {busy&&<div className="typing"><span></span><span></span><span></span><em>{status}</em></div>}
-    </div><form onSubmit={chat} className="composer"><div className="composer-shell"><div className="attach-group"><button type="button" className="icon-button" onClick={()=>docs.current?.click()} aria-label="Upload document" title="Upload document"><Icon name="attach"/></button><button type="button" className="icon-button" onClick={()=>image.current?.click()} aria-label="Analyze image" title="Analyze image"><Icon name="image"/></button><button type="button" className="icon-button" onClick={()=>video.current?.click()} aria-label="Analyze video" title="Analyze video"><Icon name="video"/></button></div><textarea value={input} onChange={e=>setInput(e.target.value)} rows={1} placeholder="Ask StudyRAG anything..." disabled={busy}/><button className="send-button" disabled={busy||!input.trim()} aria-label="Send message">{busy?<span className="send-spinner"/>:<Icon name="send"/>}</button></div><small className="composer-hint">StudyRAG can make mistakes. Check important information in your sources.</small></form>
+    </div><form onSubmit={chat} className={`composer ${view==="dashboard"?"dashboard-hidden":""}`}><div className="composer-shell"><div className="attach-group"><button type="button" className="icon-button" onClick={()=>docs.current?.click()} aria-label="Upload document" title="Upload document"><Icon name="attach"/></button><button type="button" className="icon-button" onClick={()=>image.current?.click()} aria-label="Analyze image" title="Analyze image"><Icon name="image"/></button><button type="button" className="icon-button" onClick={()=>video.current?.click()} aria-label="Analyze video" title="Analyze video"><Icon name="video"/></button></div><textarea value={input} onChange={e=>setInput(e.target.value)} rows={1} placeholder="Ask StudyRAG anything..." disabled={busy}/><button className="send-button" disabled={busy||!input.trim()} aria-label="Send message">{busy?<span className="send-spinner"/>:<Icon name="send"/>}</button></div><small className="composer-hint">StudyRAG can make mistakes. Check important information in your sources.</small></form>
       
       {documents.length > 0 && <section className="document-list" style={{marginTop: "24px", paddingTop: "16px", borderTop: "1px solid var(--line)"}}>
         <h3 style={{margin: "0 0 12px", fontSize: "12px", color: "var(--muted)", fontWeight: 600, letterSpacing: ".08em", textTransform: "uppercase"}}>Indexed Documents</h3>
@@ -138,7 +170,7 @@ export default function Home() {
               textAlign: "center",
               transition: "all .3s ease",
               cursor: "pointer"
-            }} onMouseEnter={(e) => {e.currentTarget.style.background = "rgba(63,124,231,.22)"; e.currentTarget.style.transform = "translateY(-2px)"}} onMouseLeave={(e) => {e.currentTarget.style.background = "rgba(63,124,231,.12)"; e.currentTarget.style.transform = "translateY(0)"}}>
+            }} onClick={()=>setView("dashboard")} onMouseEnter={(e) => {e.currentTarget.style.background = "rgba(63,124,231,.22)"; e.currentTarget.style.transform = "translateY(-2px)"}} onMouseLeave={(e) => {e.currentTarget.style.background = "rgba(63,124,231,.12)"; e.currentTarget.style.transform = "translateY(0)"}}>
               <div style={{fontSize: "24px", marginBottom: "6px", color: "var(--cyan)", opacity: 0.8, display:"flex", justifyContent:"center"}}><Icon name="document"/></div>
               <strong style={{display: "block", fontSize: "9px", color: "var(--text)", wordBreak: "break-word", maxHeight: "24px", overflow: "hidden"}}>{doc.filename}</strong>
               <small style={{display: "block", fontSize: "8px", color: "var(--muted)", marginTop: "4px"}}>{doc.chunks} chunks</small>
@@ -151,24 +183,12 @@ export default function Home() {
           <span><Icon name="chat"/></span>
           <span>Chat</span>
         </button>
-        <button className="nav-item-mobile" onClick={()=>document.querySelector(".document-list")?.scrollIntoView({behavior:"smooth"})} title="Documents">
+        <button className="nav-item-mobile" onClick={()=>setView("dashboard")} title="Library">
           <span><Icon name="document"/></span>
-          <span>Documents</span>
-        </button>
-        <button className="nav-item-mobile" onClick={()=>image.current?.click()} title="Images">
-          <span><Icon name="image"/></span>
-          <span>Images</span>
-        </button>
-        <button className="nav-item-mobile" onClick={()=>video.current?.click()} title="Videos">
-          <span><Icon name="video"/></span>
-          <span>Videos</span>
-        </button>
-        <button className="nav-item-mobile" onClick={()=>{setInput("Calculate ");focusChat()}} title="Calculator">
-          <span><Icon name="calculator"/></span>
-          <span>Calculator</span>
+          <span>Library</span>
         </button>
       </nav>}
     </section>
-    <input ref={docs} hidden type="file" accept=".pdf,.docx,.txt,.md" onChange={e=>{const file=e.target.files?.[0];e.target.value="";if(file)upload(file,"/api/documents")}}/><input ref={image} hidden type="file" accept="image/*" onChange={e=>{const file=e.target.files?.[0];e.target.value="";if(file)upload(file,"/api/analyze-image")}}/><input ref={video} hidden type="file" accept="video/*" onChange={e=>{const file=e.target.files?.[0];e.target.value="";if(file)upload(file,"/api/analyze-video")}}/>
+    <input ref={docs} hidden type="file" accept=".pdf,.docx,.txt,.md" onChange={e=>{const file=e.target.files?.[0];e.target.value="";if(file)upload(file,"/api/documents")}}/><input ref={image} hidden type="file" accept="image/*" onChange={e=>{const file=e.target.files?.[0];e.target.value="";if(file)upload(file,"/api/analyze-image")}}/><input ref={video} hidden type="file" accept="video/*" onChange={e=>{const file=e.target.files?.[0];e.target.value="";if(file)upload(file,"/api/analyze-video")}}/><input ref={dashboardDocs} hidden type="file" accept=".pdf,.docx,.txt,.md" onChange={e=>{const file=e.target.files?.[0];e.target.value="";if(file)upload(file,"/api/documents",false)}}/><input ref={dashboardImages} hidden type="file" accept="image/*" onChange={e=>{const file=e.target.files?.[0];e.target.value="";if(file)upload(file,"/api/analyze-image",false)}}/><input ref={dashboardVideos} hidden type="file" accept="video/*" onChange={e=>{const file=e.target.files?.[0];e.target.value="";if(file)upload(file,"/api/analyze-video",false)}}/>
   </main>;
 }

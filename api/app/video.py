@@ -1,6 +1,24 @@
 import cv2
 import numpy as np
 
+def sample_video_frames(path, max_frames=4):
+    cap = cv2.VideoCapture(path)
+    if not cap.isOpened():
+        return []
+    count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+    indices = np.linspace(0, max(count - 1, 0), min(max_frames, max(count, 1))).astype(int)
+    frames = []
+    for index in indices:
+        cap.set(cv2.CAP_PROP_POS_FRAMES, int(index))
+        ok, frame = cap.read()
+        if not ok:
+            continue
+        ok, encoded = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
+        if ok:
+            frames.append((int(index), encoded.tobytes()))
+    cap.release()
+    return frames
+
 def analyze_video_file(path, max_frames=24):
     cap = cv2.VideoCapture(path)
     if not cap.isOpened():

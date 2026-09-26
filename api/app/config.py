@@ -14,6 +14,8 @@ class Settings:
     max_upload_mb: int
     top_k: int
     database_path: str
+    mongodb_uri: str
+    mongodb_database: str
 
     @property
     def max_upload_bytes(self):
@@ -28,5 +30,7 @@ settings = Settings(
     max_upload_mb=max(1, int(os.getenv("MAX_UPLOAD_MB", "4"))),
     top_k=max(1, min(20, int(os.getenv("TOP_K", "5")))),
     database_path=os.getenv("DATABASE_PATH", "./data/studyrag.db"),
+    mongodb_uri=os.getenv("MONGODB_URI", "").strip(),
+    mongodb_database=os.getenv("MONGODB_DATABASE", "studyrag").strip(),
 )
 Path(settings.database_path).parent.mkdir(parents=True, exist_ok=True)

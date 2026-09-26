@@ -5,7 +5,7 @@ from api.app.language import detect_script
 from api.app.documents import extract_document
 from api.app.db import Database
 from api.app.rag import RAG
-from api.app.routing import calculator_expression, classify_query, retrieval_query
+from api.app.routing import calculator_expression, classify_query, retrieval_query, requests_document_summary
 from api.app.llm import SYSTEM
 
 def test_calculator():
@@ -71,6 +71,16 @@ def test_query_routing():
     assert classify_query("Explain this in detail") == "explanation"
     assert classify_query("What does the document say about overfitting?") == "document"
     assert classify_query("Calculate (437/512)*100") == "calculator"
+
+def test_document_summary_retrieves_indexed_chunks_without_keyword_overlap():
+    assert requests_document_summary("Can you summarize the document?")
+    with tempfile.TemporaryDirectory() as d:
+        db = Database(str(Path(d) / "summary.db"))
+        did = db.create_document("notes.txt", ".txt")
+        db.insert_chunks(did, [{"page": 1, "section": "", "content": "Gradient descent updates model parameters."}])
+        results = RAG(db).search("Can you summarize the document?", include_all=True)
+        assert len(results) == 1
+        assert "Gradient descent" in results[0]["content"]
 
 def test_follow_up_uses_previous_topic_for_retrieval():
     history = [{"role": "user", "content": "What is overfitting?"}]
