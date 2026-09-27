@@ -58,6 +58,7 @@ llm = LLM()
 class ChatRequest(BaseModel):
     message: str = Field(min_length=1, max_length=12000)
     conversation_id: Optional[str] = None
+    language: Optional[str] = None
 
 class RenameRequest(BaseModel):
     name: str = Field(min_length=1, max_length=160)
@@ -119,6 +120,13 @@ def rename_chat(conversation_id: str, req: RenameRequest):
         raise HTTPException(404, "Chat not found")
     return {"ok": True}
 
+@app.delete("/api/chats/{conversation_id}")
+def delete_chat(conversation_id: str):
+    if not db.delete_conversation(conversation_id):
+        raise HTTPException(404, "Chat not found")
+    rag.invalidate()
+    return {"ok": True}
+
 @app.post("/api/documents")
 async def upload_document(file: UploadFile = File(...)):
     from api.app.documents import extract_document
@@ -142,7 +150,7 @@ async def upload_document(file: UploadFile = File(...)):
 
 @app.post("/api/chat")
 def chat(req: ChatRequest):
-    lang = detect_script(req.message)
+    lang = req.language or detect_script(req.message)
     history = db.get_messages(req.conversation_id) if req.conversation_id else []
     route = classify_query(req.message, bool(history))
     media_kind = requested_media_kind(req.message)

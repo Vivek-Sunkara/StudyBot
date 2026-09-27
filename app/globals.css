@@ -191,6 +191,10 @@ button:disabled{cursor:not-allowed;opacity:.55}
   min-height:35px;
   margin-bottom:16px;
 }
+.header-controls{display:flex;align-items:center;gap:10px}
+.language-control{display:flex;align-items:center;gap:6px;color:var(--muted);font-size:10px}
+.language-control select{border:1px solid var(--line-strong);border-radius:8px;background:var(--panel-strong);color:var(--text);padding:7px 9px;font-size:10px;outline:none}
+.language-control select:focus{border-color:var(--cyan);box-shadow:0 0 0 2px rgba(110,231,255,.14)}
 .header-actions{display:flex;align-items:center;gap:10px}
 .header-spacer{flex:1}
 .theme-toggle{
@@ -638,7 +642,17 @@ button:disabled{cursor:not-allowed;opacity:.55}
   transform:scale(1.1);
 }
 
-.message-copy{white-space:pre-wrap;font-size:12px}
+.message-copy{font-size:12px;line-height:1.65;overflow-wrap:anywhere}
+.message-copy p{margin:0 0 10px}.message-copy p:last-child{margin-bottom:0}
+.message-copy h1,.message-copy h2,.message-copy h3{font-family:"Space Grotesk",sans-serif;line-height:1.25;margin:16px 0 8px;color:var(--text)}
+.message-copy h1{font-size:17px}.message-copy h2{font-size:15px}.message-copy h3{font-size:13px}
+.message-copy ul,.message-copy ol{margin:8px 0;padding-left:22px}.message-copy li{margin:4px 0}
+.message-copy code{padding:2px 5px;border-radius:4px;background:rgba(110,231,255,.1);font-size:.92em}
+.message-copy pre{overflow:auto;margin:10px 0;padding:12px;border:1px solid var(--line);border-radius:8px;background:rgba(0,0,0,.25)}
+.message-copy pre code{padding:0;background:none}
+.message-copy table{width:100%;margin:12px 0;border-collapse:collapse;display:block;overflow-x:auto;font-size:11px}
+.message-copy th,.message-copy td{min-width:120px;padding:8px 10px;border:1px solid var(--line-strong);text-align:left;vertical-align:top}
+.message-copy th{background:rgba(110,231,255,.1);color:var(--text);font-weight:700}.message-copy tr:nth-child(even) td{background:rgba(126,151,237,.05)}
 .sources{margin-top:12px;border-top:1px solid var(--line);padding-top:9px}
 .sources-heading{color:var(--cyan);font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;margin-bottom:5px}
 .source-item{display:flex;gap:8px;padding:6px;border-radius:8px;background:rgba(126,151,237,.06);margin-top:4px}

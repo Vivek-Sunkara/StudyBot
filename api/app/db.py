@@ -159,6 +159,12 @@ class Database:
             result = c.execute("UPDATE conversations SET title=? WHERE id=?", (title, conversation_id))
             return result.rowcount > 0
 
+    def delete_conversation(self, conversation_id):
+        with self.conn() as c:
+            c.execute("DELETE FROM messages WHERE conversation_id=?", (conversation_id,))
+            result = c.execute("DELETE FROM conversations WHERE id=?", (conversation_id,))
+            return result.rowcount > 0
+
 
 class MongoDatabase:
     def __init__(self, uri, database_name):
@@ -272,3 +278,8 @@ class MongoDatabase:
     def rename_conversation(self, conversation_id, title):
         result = self.conversations.update_one({"_id": conversation_id}, {"$set": {"title": title}})
         return result.matched_count > 0
+
+    def delete_conversation(self, conversation_id):
+        conversation_result = self.conversations.delete_one({"_id": conversation_id})
+        self.messages.delete_many({"conversation_id": conversation_id})
+        return conversation_result.deleted_count > 0
