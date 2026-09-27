@@ -69,12 +69,12 @@ TOOL_SCHEMAS = [{
     "type": "function",
     "function": {
         "name": "analyze_data",
-        "description": "Analyze a stored CSV locally or create a modified CSV copy using an approved operation.",
+        "description": "Analyze a stored CSV locally or create a modified CSV copy. file_id may be the uploaded file ID or exact filename.",
         "parameters": {
             "type": "object",
             "properties": {
-                "file_id": {"type": "string", "description": "ID of the uploaded CSV"},
-                "operation": {"type": "string", "enum": ["summary", "missing_values", "group_mean", "filter", "sort", "create_column"]},
+                "file_id": {"type": "string", "description": "Exact uploaded CSV filename or document ID"},
+                "operation": {"type": "string", "enum": ["summary", "columns", "describe", "head", "tail", "dtypes", "unique_values", "value_counts", "missing_values", "group_mean", "filter", "sort", "create_column"]},
                 "parameters": {"type": "object"}
             },
             "required": ["file_id", "operation"]
@@ -88,6 +88,8 @@ def execute_tool(name, arguments, database=None):
             raise ValueError("Data analysis is unavailable")
         from api.app.data_tools import analyze_csv, modified_filename
         document = database.document_info(arguments["file_id"])
+        if document is None:
+            raise ValueError("CSV not found. Use the exact uploaded filename or file ID.")
         data = database.document_bytes(arguments["file_id"])
         if not document or not data or document["file_type"] != ".csv":
             raise ValueError("The file must be an uploaded CSV with available source data")

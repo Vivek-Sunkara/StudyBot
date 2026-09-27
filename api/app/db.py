@@ -74,12 +74,18 @@ class Database:
 
     def document_bytes(self, document_id):
         with self.conn() as c:
-            row = c.execute("SELECT data FROM documents WHERE id=?", (document_id,)).fetchone()
+            row = c.execute(
+                "SELECT data FROM documents WHERE CAST(id AS TEXT)=? OR filename=? ORDER BY id DESC LIMIT 1",
+                (str(document_id), str(document_id)),
+            ).fetchone()
             return bytes(row[0]) if row and row[0] is not None else None
 
     def document_info(self, document_id):
         with self.conn() as c:
-            row = c.execute("SELECT id,filename,file_type,kind FROM documents WHERE id=?", (document_id,)).fetchone()
+            row = c.execute(
+                "SELECT id,filename,file_type,kind FROM documents WHERE CAST(id AS TEXT)=? OR filename=? ORDER BY id DESC LIMIT 1",
+                (str(document_id), str(document_id)),
+            ).fetchone()
             return dict(row) if row else None
 
     def insert_chunks(self, document_id, chunks):
@@ -214,13 +220,19 @@ class MongoDatabase:
         return str(result.inserted_id)
 
     def document_bytes(self, document_id):
-        document = self.documents.find_one({"_id": self._id(document_id)})
+        try:
+            document = self.documents.find_one({"_id": self._id(document_id)})
+        except Exception:
+            document = self.documents.find_one({"filename": str(document_id)})
         if not document or not document.get("file_id"):
             return None
         return self.files.open_download_stream(document["file_id"]).read()
 
     def document_info(self, document_id):
-        document = self.documents.find_one({"_id": self._id(document_id)})
+        try:
+            document = self.documents.find_one({"_id": self._id(document_id)})
+        except Exception:
+            document = self.documents.find_one({"filename": str(document_id)})
         if not document:
             return None
         return {"id": str(document["_id"]), "filename": document["filename"],

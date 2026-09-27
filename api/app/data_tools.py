@@ -7,7 +7,9 @@ import pandas as pd
 
 MAX_ROWS = 100_000
 ALLOWED_OPERATIONS = {
-    "summary", "missing_values", "group_mean", "filter", "sort", "create_column"
+    "summary", "columns", "describe", "head", "tail", "dtypes",
+    "unique_values", "value_counts", "missing_values", "group_mean",
+    "filter", "sort", "create_column"
 }
 
 
@@ -27,7 +29,26 @@ def analyze_csv(data, operation, parameters=None):
     if operation == "summary":
         return {"rows": len(frame), "columns": list(frame.columns),
                 "dtypes": {k: str(v) for k, v in frame.dtypes.items()},
-                "numeric": json.loads(frame.describe(include="number").to_json())}
+                "missing_values": frame.isna().sum().astype(int).to_dict(),
+                "describe": json.loads(frame.describe(include="all").fillna("").to_json())}
+    if operation == "columns":
+        return list(frame.columns)
+    if operation == "describe":
+        return json.loads(frame.describe(include="all").fillna("").to_json())
+    if operation == "head":
+        return frame.head(_limit(parameters.get("rows"))).to_dict("records")
+    if operation == "tail":
+        return frame.tail(_limit(parameters.get("rows"))).to_dict("records")
+    if operation == "dtypes":
+        return {column: str(dtype) for column, dtype in frame.dtypes.items()}
+    if operation == "unique_values":
+        column = parameters.get("column")
+        _require_columns(frame, column)
+        return frame[column].dropna().unique().tolist()[:1000]
+    if operation == "value_counts":
+        column = parameters.get("column")
+        _require_columns(frame, column)
+        return frame[column].value_counts(dropna=False).head(1000).to_dict()
     if operation == "missing_values":
         return frame.isna().sum().astype(int).to_dict()
     if operation == "group_mean":
@@ -58,6 +79,14 @@ def _require_columns(frame, *columns):
     missing = [column for column in columns if not isinstance(column, str) or column not in frame.columns]
     if missing:
         raise ValueError(f"Unknown column: {missing[0]}")
+
+
+def _limit(value):
+    if value is None:
+        return 5
+    if not isinstance(value, int) or not 1 <= value <= 100:
+        raise ValueError("rows must be an integer from 1 to 100")
+    return value
 
 
 def modified_filename(filename):
