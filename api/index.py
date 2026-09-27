@@ -8,7 +8,7 @@ from typing import Optional
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
-from pymongo.errors import PyMongoError
+from pymongo.errors import ConfigurationError, PyMongoError, ServerSelectionTimeoutError
 
 from api.app.config import settings
 from api.app.db import Database, MongoDatabase
@@ -27,9 +27,20 @@ app.add_middleware(
     allow_methods=["*"], allow_headers=["*"]
 )
 
+def _safe_mongodb_error(exc):
+    message = str(exc)
+    return message.replace(settings.mongodb_uri, "<redacted-mongodb-uri>") if settings.mongodb_uri else message
+
 @app.exception_handler(PyMongoError)
 async def mongodb_error_handler(request, exc):
-    logger.error("MongoDB request failed: %s", exc)
+    error_type = type(exc).__name__
+    if isinstance(exc, ServerSelectionTimeoutError):
+        category = "server selection timeout; check Atlas Network Access, DNS, and TLS"
+    elif isinstance(exc, ConfigurationError):
+        category = "configuration error; check MONGODB_URI and database credentials"
+    else:
+        category = "database operation failure"
+    logger.error("MongoDB %s (%s): %s", category, error_type, _safe_mongodb_error(exc))
     return JSONResponse(
         status_code=503,
         content={
@@ -53,7 +64,14 @@ class RenameRequest(BaseModel):
 
 @app.get("/api/health")
 def health():
+    if os.getenv("VERCEL") and not settings.mongodb_uri:
+        return JSONResponse(
+            status_code=503,
+            content={"ok": False, "detail": "MONGODB_URI is not configured for the Vercel deployment."},
+        )
+    db.ping()
     return {"ok": True, "groq_configured": llm.enabled,
+            "database": "mongodb" if settings.mongodb_uri else "sqlite",
             "documents": db.document_count(), "chunks": db.chunk_count()}
 
 @app.get("/api/documents")

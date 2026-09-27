@@ -6,10 +6,12 @@ try:
     from bson import ObjectId
     from gridfs import GridFSBucket
     from pymongo import MongoClient
+    from pymongo.errors import PyMongoError
 except ImportError:
     ObjectId = None
     GridFSBucket = None
     MongoClient = None
+    PyMongoError = RuntimeError
 
 class Database:
     def __init__(self, path):
@@ -110,6 +112,9 @@ class Database:
         with self.conn() as c:
             return c.execute("SELECT COUNT(*) FROM chunks").fetchone()[0]
 
+    def ping(self):
+        return True
+
     def add_message(self, conversation_id, role, content):
         with self.conn() as c:
             c.execute(
@@ -159,13 +164,23 @@ class MongoDatabase:
     def __init__(self, uri, database_name):
         if MongoClient is None:
             raise RuntimeError("pymongo is required when MONGODB_URI is configured")
-        self.client = MongoClient(uri, serverSelectionTimeoutMS=5000)
+        self.client = MongoClient(
+            uri,
+            appname="studyrag",
+            serverSelectionTimeoutMS=5000,
+            connectTimeoutMS=5000,
+            socketTimeoutMS=10000,
+        )
         self.database = self.client[database_name]
         self.documents = self.database.documents
         self.chunks = self.database.chunks
         self.conversations = self.database.conversations
         self.messages = self.database.messages
         self.files = GridFSBucket(self.database)
+
+    def ping(self):
+        self.client.admin.command("ping")
+        return True
 
     def _id(self, value):
         return value if isinstance(value, ObjectId) else ObjectId(str(value))
