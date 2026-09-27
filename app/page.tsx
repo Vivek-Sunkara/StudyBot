@@ -91,6 +91,23 @@ export default function Home() {
     if(conversationId.current===item.id)newChat();
     await refreshChats();
   }
+  async function changeLanguage(language:ResponseLanguage) {
+    setResponseLanguage(language);
+    if(language === "auto" || !messages.length || busy)return;
+    setBusy(true);setStatus(`Translating conversation to ${language}...`);
+    try {
+      const translated=await Promise.all(messages.map(async message=>{
+        const response=await fetch("/api/translate",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({text:message.content,language})});
+        const data=await response.json();
+        if(!response.ok)throw new Error(data.detail||"Translation failed");
+        return data.text as string;
+      }));
+      setMessages(current=>current.map((message,index)=>({...message,content:translated[index]})));
+      setStatus(`Conversation translated to ${language}`);
+    } catch(err) {
+      setStatus(String(err));
+    } finally {setBusy(false);}
+  }
 
   async function chat(e:React.FormEvent) {
     e.preventDefault(); const text=input.trim(); if(!text||busy)return;
@@ -133,7 +150,7 @@ export default function Home() {
   const libraryGroups=["document","image","video"] as const;
   return <main className="app-shell">
     <aside className="sidebar"><div className="sidebar-brand"><div className="logo-orbit"><span>S</span></div><div><strong>StudyRAG</strong><small>Midnight Scholar</small></div></div><button className="new-chat" onClick={newChat}><span>＋</span> New chat</button><nav className="nav-group" aria-label="StudyRAG navigation"><span className="nav-label">Workspace</span><button className={`nav-item ${view==="chat"?"active":""}`} onClick={()=>{setView("chat");focusChat()}}><span><Icon name="chat"/></span> Chat <kbd>⌘ 1</kbd></button><button className={`nav-item ${view==="dashboard"?"active":""}`} onClick={()=>setView("dashboard")}><span><Icon name="document"/></span> Library <em>{documents.length}</em></button></nav><div className="sidebar-history"><span className="nav-label">Recent chats</span>{chats.slice(0,5).map(chat=><button className="history-item" key={chat.id} onClick={()=>openChat(chat.id)}><span><Icon name="chat"/></span> <span>{chat.title}</span></button>)}</div><div className="sidebar-bottom"><div className="profile"><div className="profile-avatar">S</div><div><strong>Study student</strong><small>{status}</small></div></div></div></aside>
-    <section className="workspace"><header className="workspace-header"><div style={{visibility:"hidden"}}><span className="live-dot"></span><span className="header-status">AI study space</span></div><div className="header-controls"><label className="language-control"><span>Language</span><select value={responseLanguage} onChange={e=>setResponseLanguage(e.target.value as ResponseLanguage)} aria-label="Response language"><option value="auto">Auto detect</option><option value="English">English</option><option value="Telugu">Telugu</option><option value="Hindi">Hindi</option><option value="Tamil">Tamil</option></select></label><button className="theme-toggle" onClick={toggleTheme} aria-label={`Switch to ${theme==="dark"?"light":"dark"} mode`} title={`Switch to ${theme==="dark"?"light":"dark"} mode`}><span className="sun-icon">☀️</span><span className="moon-icon">🌙</span><span className="eclipse"><i></i></span></button></div></header>
+    <section className="workspace"><header className="workspace-header"><div style={{visibility:"hidden"}}><span className="live-dot"></span><span className="header-status">AI study space</span></div><div className="header-controls"><label className="language-control"><span>Language</span><select value={responseLanguage} onChange={e=>changeLanguage(e.target.value as ResponseLanguage)} aria-label="Response language"><option value="auto">Auto detect</option><option value="English">English</option><option value="Telugu">Telugu</option><option value="Hindi">Hindi</option><option value="Tamil">Tamil</option></select></label><button className="theme-toggle" onClick={toggleTheme} aria-label={`Switch to ${theme==="dark"?"light":"dark"} mode`} title={`Switch to ${theme==="dark"?"light":"dark"} mode`}><span className="sun-icon">☀️</span><span className="moon-icon">🌙</span><span className="eclipse"><i></i></span></button></div></header>
       {view==="dashboard"&&<section className="dashboard-panel">
         <div className="dashboard-heading"><div><span className="nav-label">Workspace</span><h1>Study library</h1><p>Manage your study materials and return to any conversation.</p></div><button className="new-chat" onClick={newChat}>＋ New chat</button></div>
         <div className="dashboard-grid"><section className="dashboard-section"><div className="section-heading"><div><h2>Library</h2><p>{documents.length} uploaded items</p></div><div className="library-add"><button className="icon-button" onClick={()=>dashboardDocs.current?.click()} title="Add document" aria-label="Add document"><Icon name="document"/></button><button className="icon-button" onClick={()=>dashboardImages.current?.click()} title="Add image" aria-label="Add image"><Icon name="image"/></button><button className="icon-button" onClick={()=>dashboardVideos.current?.click()} title="Add video" aria-label="Add video"><Icon name="video"/></button></div></div>

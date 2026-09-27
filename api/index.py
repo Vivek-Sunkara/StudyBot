@@ -60,6 +60,10 @@ class ChatRequest(BaseModel):
     conversation_id: Optional[str] = None
     language: Optional[str] = None
 
+class TranslationRequest(BaseModel):
+    text: str = Field(min_length=1, max_length=12000)
+    language: str = Field(min_length=2, max_length=40)
+
 class RenameRequest(BaseModel):
     name: str = Field(min_length=1, max_length=160)
 
@@ -74,6 +78,16 @@ def health():
     return {"ok": True, "groq_configured": llm.enabled,
             "database": "mongodb" if settings.mongodb_uri else "sqlite",
             "documents": db.document_count(), "chunks": db.chunk_count()}
+
+@app.post("/api/translate")
+def translate(req: TranslationRequest):
+    if not llm.enabled:
+        raise HTTPException(503, "Translation requires a configured language model")
+    try:
+        return {"text": llm.translate(req.text, req.language)}
+    except Exception as exc:
+        logger.exception("Translation request failed")
+        raise HTTPException(502, "Translation failed") from exc
 
 @app.get("/api/documents")
 def documents():

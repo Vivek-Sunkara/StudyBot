@@ -76,6 +76,26 @@ class LLM:
                 continue
         return descriptions
 
+    def translate(self, text, language):
+        response = self.client.chat.completions.create(
+            model=settings.groq_model,
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "Translate the supplied study-chat message completely into the requested language. "
+                        "Return only the translated message. Preserve Markdown headings, GFM table structure, "
+                        "table separators, bullet lists, citations such as [SOURCE 1], code, formulas, numbers, "
+                        "and proper nouns. Do not summarize, omit, or add content."
+                    ),
+                },
+                {"role": "user", "content": f"Requested language: {language}\n\nMessage:\n{text}"},
+            ],
+            temperature=0.1,
+            max_completion_tokens=1600,
+        )
+        return response.choices[0].message.content or text
+
     def answer(self, question, language, results, executor, schemas,
                history=None, route="general"):
         context = "\n\n".join(
