@@ -26,6 +26,11 @@ columns on every row. Do not output table-like pipe text without the separator
 row. Keep citations, code, formulas, and proper nouns intact when translation
 would make them inaccurate.
 Use the calculate tool for arithmetic.
+For CSV or dataframe questions about columns, headers, rows, dtypes, missing values,
+unique values, counts, previews, descriptions, or other dataset facts, always use
+the analyze_data tool. Use the exact uploaded filename shown in the Knowledge section
+as file_id when no document ID is available. Never guess CSV contents from the RAG
+placeholder; the tool reads the stored file with Python.
 Do not claim that classical image/video analysis performs OCR, speech recognition,
 or general human-level visual understanding.
 """
@@ -105,6 +110,7 @@ class LLM:
         route_instruction = {
             "conversation": "Respond naturally as a conversational assistant; do not claim document information was missing.",
             "calculator": "Use the calculate tool for the arithmetic request and explain the result briefly.",
+            "data": "Use analyze_data now. Inspect the stored CSV directly and return the requested dataset result.",
             "document": "Synthesize a direct answer from the supplied document context in your own words and cite only the supplied sources.",
             "explanation": "Teach the topic in your own words using the supplied context as grounding. Examples must be logical illustrations, not invented document claims.",
             "general": "Answer normally. Use the supplied context only when it is relevant to the question.",
@@ -115,12 +121,12 @@ class LLM:
             f"Language: {language}\nRoute: {route_instruction}\n\nKnowledge:\n{context or '[none]'}"
             f"\n\nQuestion:\n{question}"})
         logs = []
-        for _ in range(3):
+        for attempt in range(3):
             r = self.client.chat.completions.create(
                 model=settings.groq_model,
                 messages=messages,
                 tools=schemas,
-                tool_choice="auto",
+                tool_choice="required" if route == "data" and attempt == 0 else "auto",
                 temperature=0.2,
                 max_completion_tokens=1200,
             )

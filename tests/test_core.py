@@ -71,6 +71,8 @@ def test_query_routing():
     assert classify_query("Explain this in detail") == "explanation"
     assert classify_query("What does the document say about overfitting?") == "document"
     assert classify_query("Calculate (437/512)*100") == "calculator"
+    assert classify_query("What are the column names in results.csv?") == "data"
+    assert classify_query("Describe the dataset") == "data"
 
 def test_document_summary_retrieves_indexed_chunks_without_keyword_overlap():
     assert requests_document_summary("Can you summarize the document?")

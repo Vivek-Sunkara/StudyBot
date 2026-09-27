@@ -25,6 +25,11 @@ SUMMARY_RE = re.compile(
 )
 VIDEO_RE = re.compile(r"\b(?:video|clip|footage|recording)\b", re.IGNORECASE)
 IMAGE_RE = re.compile(r"\b(?:image|picture|photo|diagram|figure)\b", re.IGNORECASE)
+DATA_RE = re.compile(
+    r"\b(?:csv|dataframe|data frame|column(?:s)?|header(?:s)?|row(?:s)?|"
+    r"count|dtype|data type|unique|missing values|describe|head|tail|pandas|dataset)\b",
+    re.IGNORECASE,
+)
 
 
 def classify_query(query, has_history=False):
@@ -32,6 +37,8 @@ def classify_query(query, has_history=False):
         return "conversation"
     if CALCULATOR_RE.search(query):
         return "calculator"
+    if DATA_RE.search(query):
+        return "data"
     if FOLLOW_UP_RE.match(query.strip()) and has_history:
         return "explanation"
     if EXPLANATION_RE.search(query):
