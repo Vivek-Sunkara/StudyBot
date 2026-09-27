@@ -12,8 +12,6 @@ from pymongo.errors import PyMongoError
 
 from api.app.config import settings
 from api.app.db import Database, MongoDatabase
-from api.app.documents import extract_document
-from api.app.images import analyze_image_bytes
 from api.app.language import detect_script
 from api.app.rag import RAG
 from api.app.routing import calculator_expression, classify_query, retrieval_query, requests_document_summary, requested_media_kind
@@ -105,6 +103,8 @@ def rename_chat(conversation_id: str, req: RenameRequest):
 
 @app.post("/api/documents")
 async def upload_document(file: UploadFile = File(...)):
+    from api.app.documents import extract_document
+
     suffix = Path(file.filename or "").suffix.lower()
     if suffix not in {".pdf", ".docx", ".txt", ".md"}:
         raise HTTPException(400, "Supported files: PDF, DOCX, TXT, MD")
@@ -172,6 +172,8 @@ def chat(req: ChatRequest):
 
 @app.post("/api/analyze-image")
 async def analyze_image(file: UploadFile = File(...)):
+    from api.app.images import analyze_image_bytes
+
     data = await file.read()
     if len(data) > settings.max_upload_bytes:
         raise HTTPException(413, f"File exceeds {settings.max_upload_mb} MB")
