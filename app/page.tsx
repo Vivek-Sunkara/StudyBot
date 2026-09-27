@@ -5,7 +5,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
 type Source = {document:string;page:number;score:number;chunk_id:number};
-type Message = {role:"user"|"assistant";content:string;sources?:Source[];time:string;media?:{type:string;url:string;name:string}[]};
+type Message = {role:"user"|"assistant";content:string;originalContent?:string;sources?:Source[];time:string;media?:{type:string;url:string;name:string}[]};
 type KnowledgeDocument = {id:number|string;filename:string;file_type:string;kind:string;chunks:number;created_at?:string};
 type Conversation = {id:string;title:string;message_count:number;updated_at:string};
 type Theme = "light"|"dark";
@@ -64,9 +64,26 @@ export default function Home() {
 
   async function refreshKnowledge() { const response=await fetch("/api/documents");if(response.ok)setDocuments(await response.json()); }
   async function refreshChats() { const response=await fetch("/api/chats");if(response.ok)setChats(await response.json()); }
+  async function translateMessages(items:Message[], language:Exclude<ResponseLanguage,"auto">) {
+    return Promise.all(items.map(async message=>{
+      const response=await fetch("/api/translate",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({text:message.originalContent ?? message.content,language})});
+      const data=await response.json();
+      if(!response.ok)throw new Error(data.detail||"Translation failed");
+      return {...message,content:data.text,originalContent:message.originalContent ?? message.content};
+    }));
+  }
+  async function localizeMessages(items:Message[], language:ResponseLanguage) {
+    if(language === "auto")return items.map(message=>({...message,content:message.originalContent ?? message.content}));
+    return translateMessages(items,language);
+  }
   async function openChat(id:string) {
     const response=await fetch(`/api/chats/${id}`); if(!response.ok)return;
-    const data=await response.json(); conversationId.current=id; setMessages(data.messages.map((m:{role:"user"|"assistant";content:string},i:number)=>({...m,time:`History ${i+1}`}))); setView("chat");
+    const data=await response.json(); conversationId.current=id;
+    const history=data.messages.map((m:{role:"user"|"assistant";content:string},i:number)=>({...m,originalContent:m.content,time:`History ${i+1}`}));
+    setBusy(true);setStatus(responseLanguage === "auto" ? "Opening conversation..." : `Translating conversation to ${responseLanguage}...`);
+    try { setMessages(await localizeMessages(history,responseLanguage));setView("chat"); }
+    catch(err) { setMessages(history);setStatus(String(err)); }
+    finally { setBusy(false); }
   }
   function beginRename(item:KnowledgeDocument|Conversation, type:"library"|"chat") {
     const name=type === "library" ? (item as KnowledgeDocument).filename : (item as Conversation).title;
@@ -93,17 +110,11 @@ export default function Home() {
   }
   async function changeLanguage(language:ResponseLanguage) {
     setResponseLanguage(language);
-    if(language === "auto" || !messages.length || busy)return;
-    setBusy(true);setStatus(`Translating conversation to ${language}...`);
+    if(!messages.length || busy)return;
+    setBusy(true);setStatus(language === "auto" ? "Restoring original conversation..." : `Translating conversation to ${language}...`);
     try {
-      const translated=await Promise.all(messages.map(async message=>{
-        const response=await fetch("/api/translate",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({text:message.content,language})});
-        const data=await response.json();
-        if(!response.ok)throw new Error(data.detail||"Translation failed");
-        return data.text as string;
-      }));
-      setMessages(current=>current.map((message,index)=>({...message,content:translated[index]})));
-      setStatus(`Conversation translated to ${language}`);
+      setMessages(await localizeMessages(messages,language));
+      setStatus(language === "auto" ? "Original conversation restored" : `Conversation translated to ${language}`);
     } catch(err) {
       setStatus(String(err));
     } finally {setBusy(false);}
@@ -111,12 +122,13 @@ export default function Home() {
 
   async function chat(e:React.FormEvent) {
     e.preventDefault(); const text=input.trim(); if(!text||busy)return;
-    setMessages(m=>[...m,{role:"user",content:text,time:now()}]);setInput("");setBusy(true);setStatus("Thinking with your sources...");
+    setMessages(m=>[...m,{role:"user",content:text,originalContent:text,time:now()}]);setInput("");setBusy(true);setStatus("Thinking with your sources...");
     try {
       const response=await fetch("/api/chat",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({message:text,conversation_id:conversationId.current,language:responseLanguage === "auto" ? undefined : responseLanguage})});
       const data=await response.json();if(!response.ok)throw new Error(data.detail||"Request failed");
-      setMessages(m=>[...m,{role:"assistant",content:data.answer,sources:data.sources,time:now()}]);setStatus(data.mode==="groq+local-rag"?"Grounded response ready":"Local knowledge response ready");await refreshChats();
-    } catch(err) {setMessages(m=>[...m,{role:"assistant",content:String(err),time:now()}]);setStatus("Connection issue");}
+      const assistantMessage={role:"assistant" as const,content:data.answer,originalContent:data.answer,sources:data.sources,time:now()};
+      setMessages(m=>[...m, responseLanguage === "auto" ? assistantMessage : {...assistantMessage,content:data.answer}]);setStatus(data.mode==="groq+local-rag"?"Grounded response ready":"Local knowledge response ready");await refreshChats();
+    } catch(err) {setMessages(m=>[...m,{role:"assistant",content:String(err),originalContent:String(err),time:now()}]);setStatus("Connection issue");}
     finally {setBusy(false);}
   }
 
@@ -128,7 +140,7 @@ export default function Home() {
       const content=endpoint.endsWith("documents")?`${file.name} is now searchable in your study space. ${data.chunks} knowledge chunks indexed.`:endpoint.endsWith("image")?(data.description||data.note):data.note;
       const mediaType = endpoint.endsWith("documents")?"document":endpoint.endsWith("image")?"image":"video";
       const mediaUrl = URL.createObjectURL(file);
-      if(showInChat)setMessages(m=>[...m,{role:"assistant",content,time:now(),media:[{type:mediaType,url:mediaUrl,name:file.name}]}]);setStatus(endpoint.endsWith("documents")?"Document indexed":endpoint.endsWith("image")?(data.indexed?"Image understood and indexed":"Image diagnostics ready"):"Video analysis ready");await refreshKnowledge();await refreshChats();
+      if(showInChat)setMessages(m=>[...m,{role:"assistant",content,originalContent:content,time:now(),media:[{type:mediaType,url:mediaUrl,name:file.name}]}]);setStatus(endpoint.endsWith("documents")?"Document indexed":endpoint.endsWith("image")?(data.indexed?"Image understood and indexed":"Image diagnostics ready"):"Video analysis ready");await refreshKnowledge();await refreshChats();
     } catch(err){setStatus(String(err));} finally{setBusy(false);}
   }
 
@@ -216,6 +228,6 @@ export default function Home() {
         </button>
       </nav>}
     </section>
-    <input ref={docs} hidden type="file" accept=".pdf,.docx,.txt,.md" onChange={e=>{const file=e.target.files?.[0];e.target.value="";if(file)upload(file,"/api/documents")}}/><input ref={image} hidden type="file" accept="image/*" onChange={e=>{const file=e.target.files?.[0];e.target.value="";if(file)upload(file,"/api/analyze-image")}}/><input ref={video} hidden type="file" accept="video/*" onChange={e=>{const file=e.target.files?.[0];e.target.value="";if(file)upload(file,"/api/analyze-video")}}/><input ref={dashboardDocs} hidden type="file" accept=".pdf,.docx,.txt,.md" onChange={e=>{const file=e.target.files?.[0];e.target.value="";if(file)upload(file,"/api/documents",false)}}/><input ref={dashboardImages} hidden type="file" accept="image/*" onChange={e=>{const file=e.target.files?.[0];e.target.value="";if(file)upload(file,"/api/analyze-image",false)}}/><input ref={dashboardVideos} hidden type="file" accept="video/*" onChange={e=>{const file=e.target.files?.[0];e.target.value="";if(file)upload(file,"/api/analyze-video",false)}}/>
+    <input ref={docs} hidden type="file" accept=".pdf,.docx,.txt,.md,.csv" onChange={e=>{const file=e.target.files?.[0];e.target.value="";if(file)upload(file,"/api/documents")}}/><input ref={image} hidden type="file" accept="image/*" onChange={e=>{const file=e.target.files?.[0];e.target.value="";if(file)upload(file,"/api/analyze-image")}}/><input ref={video} hidden type="file" accept="video/*" onChange={e=>{const file=e.target.files?.[0];e.target.value="";if(file)upload(file,"/api/analyze-video")}}/><input ref={dashboardDocs} hidden type="file" accept=".pdf,.docx,.txt,.md,.csv" onChange={e=>{const file=e.target.files?.[0];e.target.value="";if(file)upload(file,"/api/documents",false)}}/><input ref={dashboardImages} hidden type="file" accept="image/*" onChange={e=>{const file=e.target.files?.[0];e.target.value="";if(file)upload(file,"/api/analyze-image",false)}}/><input ref={dashboardVideos} hidden type="file" accept="video/*" onChange={e=>{const file=e.target.files?.[0];e.target.value="";if(file)upload(file,"/api/analyze-video",false)}}/>
   </main>;
 }

@@ -65,9 +65,37 @@ TOOL_SCHEMAS = [{
             "required": ["expression"]
         }
     }
+}, {
+    "type": "function",
+    "function": {
+        "name": "analyze_data",
+        "description": "Analyze a stored CSV locally or create a modified CSV copy using an approved operation.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "file_id": {"type": "string", "description": "ID of the uploaded CSV"},
+                "operation": {"type": "string", "enum": ["summary", "missing_values", "group_mean", "filter", "sort", "create_column"]},
+                "parameters": {"type": "object"}
+            },
+            "required": ["file_id", "operation"]
+        }
+    }
 }]
 
-def execute_tool(name, arguments):
+def execute_tool(name, arguments, database=None):
+    if name == "analyze_data":
+        if database is None:
+            raise ValueError("Data analysis is unavailable")
+        from api.app.data_tools import analyze_csv, modified_filename
+        document = database.document_info(arguments["file_id"])
+        data = database.document_bytes(arguments["file_id"])
+        if not document or not data or document["file_type"] != ".csv":
+            raise ValueError("The file must be an uploaded CSV with available source data")
+        result = analyze_csv(data, arguments["operation"], arguments.get("parameters"))
+        if isinstance(result, bytes):
+            new_id = database.create_document(modified_filename(document["filename"]), ".csv", "data", result)
+            return {"modified_file_id": str(new_id), "filename": modified_filename(document["filename"])}
+        return result
     if name != "calculate":
         raise ValueError("Unknown tool")
     return str(CALCULATOR.evaluate(arguments["expression"]))

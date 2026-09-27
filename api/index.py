@@ -67,6 +67,11 @@ class TranslationRequest(BaseModel):
 class RenameRequest(BaseModel):
     name: str = Field(min_length=1, max_length=160)
 
+class DataAnalysisRequest(BaseModel):
+    file_id: str
+    operation: str
+    parameters: dict = Field(default_factory=dict)
+
 @app.get("/api/health")
 def health():
     if os.getenv("VERCEL") and not settings.mongodb_uri:
@@ -146,13 +151,16 @@ async def upload_document(file: UploadFile = File(...)):
     from api.app.documents import extract_document
 
     suffix = Path(file.filename or "").suffix.lower()
-    if suffix not in {".pdf", ".docx", ".txt", ".md"}:
-        raise HTTPException(400, "Supported files: PDF, DOCX, TXT, MD")
+    if suffix not in {".pdf", ".docx", ".txt", ".md", ".csv"}:
+        raise HTTPException(400, "Supported files: PDF, DOCX, TXT, MD, CSV")
     data = await file.read()
     if len(data) > settings.max_upload_bytes:
         raise HTTPException(413, f"File exceeds {settings.max_upload_mb} MB")
     try:
-        chunks = extract_document(data, suffix, file.filename or "document")
+        if suffix == ".csv":
+            chunks = [{"page": 0, "section": "Data file", "content": "CSV data file available for local analysis."}]
+        else:
+            chunks = extract_document(data, suffix, file.filename or "document")
         if not chunks:
             raise ValueError("No readable text found")
         doc_id = db.create_document(file.filename or "document", suffix, "document", data)
@@ -175,7 +183,7 @@ def chat(req: ChatRequest):
     if llm.enabled:
         try:
             answer, calls = llm.answer(
-                req.message, lang, results, execute_tool, TOOL_SCHEMAS,
+                req.message, lang, results, lambda name, args: execute_tool(name, args, db), TOOL_SCHEMAS,
                 history=history, route=route,
             )
             mode = "groq+local-rag"

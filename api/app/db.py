@@ -33,6 +33,7 @@ class Database:
                 filename TEXT NOT NULL,
                 file_type TEXT NOT NULL,
                 kind TEXT NOT NULL DEFAULT 'document',
+                data BLOB,
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP
             );
             CREATE TABLE IF NOT EXISTS chunks(
@@ -61,13 +62,25 @@ class Database:
             columns = {row[1] for row in c.execute("PRAGMA table_info(documents)")}
             if "kind" not in columns:
                 c.execute("ALTER TABLE documents ADD COLUMN kind TEXT NOT NULL DEFAULT 'document'")
+            if "data" not in columns:
+                c.execute("ALTER TABLE documents ADD COLUMN data BLOB")
 
     def create_document(self, filename, file_type, kind="document", data=None):
         with self.conn() as c:
             return c.execute(
-                "INSERT INTO documents(filename,file_type,kind) VALUES(?,?,?)",
-                (filename, file_type, kind)
+                "INSERT INTO documents(filename,file_type,kind,data) VALUES(?,?,?,?)",
+                (filename, file_type, kind, data)
             ).lastrowid
+
+    def document_bytes(self, document_id):
+        with self.conn() as c:
+            row = c.execute("SELECT data FROM documents WHERE id=?", (document_id,)).fetchone()
+            return bytes(row[0]) if row and row[0] is not None else None
+
+    def document_info(self, document_id):
+        with self.conn() as c:
+            row = c.execute("SELECT id,filename,file_type,kind FROM documents WHERE id=?", (document_id,)).fetchone()
+            return dict(row) if row else None
 
     def insert_chunks(self, document_id, chunks):
         with self.conn() as c:
@@ -199,6 +212,19 @@ class MongoDatabase:
             "file_id": file_id, "created_at": now,
         })
         return str(result.inserted_id)
+
+    def document_bytes(self, document_id):
+        document = self.documents.find_one({"_id": self._id(document_id)})
+        if not document or not document.get("file_id"):
+            return None
+        return self.files.open_download_stream(document["file_id"]).read()
+
+    def document_info(self, document_id):
+        document = self.documents.find_one({"_id": self._id(document_id)})
+        if not document:
+            return None
+        return {"id": str(document["_id"]), "filename": document["filename"],
+                "file_type": document["file_type"], "kind": document.get("kind", "document")}
 
     def insert_chunks(self, document_id, chunks):
         if chunks:
