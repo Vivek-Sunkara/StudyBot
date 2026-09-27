@@ -1,9 +1,12 @@
 from fastapi.responses import JSONResponse
+import io
 import os
 import logging
 import tempfile
 from pathlib import Path
 from typing import Optional
+
+import pandas as pd
 
 from api.app.data_tools import analyze_csv
 
@@ -77,6 +80,10 @@ class DataAnalysisRequest(BaseModel):
 
 def _local_data_fallback(question: str, database, language: str):
     text = (question or "").lower()
+
+    def normalized(value):
+        return "".join(character for character in str(value).lower() if character.isalnum())
+
     csv_docs = [
         doc for doc in database.list_documents()
         if (doc.get("file_type") or "").lower() == ".csv" or str(doc.get("filename") or "").lower().endswith(".csv")
@@ -85,12 +92,11 @@ def _local_data_fallback(question: str, database, language: str):
         return "I could not find any uploaded CSV file to inspect directly."
 
     target_name = None
-    if ".csv" in text:
-        for doc in csv_docs:
-            filename = str(doc.get("filename") or "").lower()
-            if filename in text or text in filename:
-                target_name = doc["filename"]
-                break
+    for doc in csv_docs:
+        filename = str(doc.get("filename") or "").lower()
+        if filename in text or text in filename:
+            target_name = doc["filename"]
+            break
     if target_name is None:
         target_name = csv_docs[0]["filename"]
 
@@ -102,20 +108,53 @@ def _local_data_fallback(question: str, database, language: str):
     if not payload:
         return "The CSV file is present, but its contents are not available for inspection."
 
-    operation = "columns" if any(token in text for token in ["column", "columns", "header", "headers", "field", "fields", "name", "names"]) else "summary"
-    result = analyze_csv(payload, operation)
+    try:
+        frame = pd.read_csv(io.BytesIO(payload))
+    except Exception:
+        return "I could not parse the uploaded CSV file."
 
-    if operation == "columns":
-        columns = result if isinstance(result, list) else []
-        if not columns:
-            return "I inspected the CSV, but it does not contain any columns."
+    columns = list(frame.columns)
+    if not columns:
+        return "I inspected the CSV, but it does not contain any columns."
+
+    if any(token in text for token in ["column names", "columns", "header", "headers", "field", "fields", "name", "names"]) and not any(token in text for token in ["average", "avg", "mean", "sum", "total", "count", "describe", "distribution", "unique"]):
         return "I inspected the uploaded CSV and the columns are: " + ", ".join(columns)
 
+    if any(token in text for token in ["average", "avg", "mean"]):
+        normalized_text = normalized(text)
+        match = next((column for column in columns if normalized(column) in normalized_text), None)
+        if match is None:
+            numeric = [c for c in columns if pd.api.types.is_numeric_dtype(frame[c])]
+            if len(numeric) == 1:
+                match = numeric[0]
+        if match is None:
+            return "I inspected the CSV, but I could not find a numeric column to average."
+        values = pd.to_numeric(frame[match], errors="coerce").dropna()
+        if values.empty:
+            return f"The {match} column does not contain numeric values that can be averaged."
+        average_value = float(values.mean())
+        return f"The average of the {match} column is {average_value:.6g}."
+
+    if any(token in text for token in ["sum", "total"]):
+        normalized_text = normalized(text)
+        match = next((column for column in columns if normalized(column) in normalized_text), None)
+        if match is None:
+            numeric = [c for c in columns if pd.api.types.is_numeric_dtype(frame[c])]
+            if len(numeric) == 1:
+                match = numeric[0]
+        if match is None:
+            return "I inspected the CSV, but I could not find a numeric column to sum."
+        total = pd.to_numeric(frame[match], errors="coerce").sum()
+        return f"The total of the {match} column is {float(total):.6g}."
+
+    if any(token in text for token in ["describe", "summary", "overview"]):
+        summary = analyze_csv(payload, "summary")
+        rows = summary.get("rows", 0)
+        return f"I inspected the uploaded CSV and found {rows} rows with the following columns: {', '.join(columns)}."
+
+    result = analyze_csv(payload, "summary")
     rows = result.get("rows", 0)
-    cols = result.get("columns", [])
-    if not cols:
-        return "I inspected the uploaded CSV, but it does not contain any usable columns."
-    return f"I inspected the uploaded CSV and found {rows} rows with the following columns: {', '.join(cols)}."
+    return f"I inspected the uploaded CSV and found {rows} rows with the following columns: {', '.join(columns)}."
 
 
 @app.get("/api/health")
@@ -229,9 +268,14 @@ def chat(req: ChatRequest):
     )
     if llm.enabled:
         try:
+            data_files = [
+                str(doc.get("filename")) for doc in db.list_documents()
+                if (doc.get("file_type") or "").lower() == ".csv"
+                or str(doc.get("filename") or "").lower().endswith(".csv")
+            ]
             answer, calls = llm.answer(
                 req.message, lang, results, lambda name, args: execute_tool(name, args, db), TOOL_SCHEMAS,
-                history=history, route=route,
+                history=history, route=route, data_files=data_files,
             )
             mode = "groq+local-rag"
         except Exception:

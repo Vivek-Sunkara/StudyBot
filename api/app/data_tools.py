@@ -9,7 +9,8 @@ MAX_ROWS = 100_000
 ALLOWED_OPERATIONS = {
     "summary", "columns", "describe", "head", "tail", "dtypes",
     "unique_values", "value_counts", "missing_values", "group_mean",
-    "filter", "sort", "create_column"
+    "group_agg", "filter", "sort", "create_column", "mean", "median",
+    "sum", "min", "max", "count", "std", "corr", "quantile"
 }
 
 
@@ -56,10 +57,22 @@ def analyze_csv(data, operation, parameters=None):
         column = parameters.get("column")
         _require_columns(frame, group_by, column)
         return frame.groupby(group_by, dropna=False)[column].mean().reset_index().to_dict("records")
+    if operation == "group_agg":
+        group_by = parameters.get("by")
+        column = parameters.get("column")
+        agg = parameters.get("agg", "mean")
+        _require_columns(frame, group_by, column)
+        if agg not in {"mean", "sum", "median", "min", "max", "count", "std"}:
+            raise ValueError("Unsupported aggregation")
+        result = getattr(frame.groupby(group_by, dropna=False)[column], agg)()
+        return result.reset_index().to_dict("records")
     if operation == "filter":
         column = parameters.get("column")
         _require_columns(frame, column)
-        return frame[frame[column].astype(str) == str(parameters.get("value"))].head(1000).to_dict("records")
+        value = parameters.get("value")
+        if value is None:
+            raise ValueError("filter requires a value")
+        return frame[frame[column].astype(str) == str(value)].head(1000).to_dict("records")
     if operation == "sort":
         column = parameters.get("column")
         _require_columns(frame, column)
@@ -73,6 +86,47 @@ def analyze_csv(data, operation, parameters=None):
             raise ValueError("create_column requires a name and numeric multiplier")
         frame[name] = frame[source] * multiplier
         return frame.to_csv(index=False).encode("utf-8")
+
+    if operation in {"mean", "median", "sum", "min", "max", "count", "std"}:
+        column = parameters.get("column")
+        _require_columns(frame, column)
+        series = pd.to_numeric(frame[column], errors="coerce")
+        if operation == "mean":
+            return float(series.mean()) if not series.empty else None
+        if operation == "median":
+            return float(series.median()) if not series.empty else None
+        if operation == "sum":
+            return float(series.sum()) if not series.empty else 0.0
+        if operation == "min":
+            return float(series.min()) if not series.empty else None
+        if operation == "max":
+            return float(series.max()) if not series.empty else None
+        if operation == "count":
+            return int(series.count())
+        if operation == "std":
+            return float(series.std()) if series.count() > 1 else 0.0
+
+    if operation == "corr":
+        left = parameters.get("left")
+        right = parameters.get("right")
+        _require_columns(frame, left, right)
+        left_series = pd.to_numeric(frame[left], errors="coerce")
+        right_series = pd.to_numeric(frame[right], errors="coerce")
+        pair = pd.concat([left_series, right_series], axis=1).dropna()
+        if pair.empty:
+            return None
+        return float(pair[left].corr(pair[right]))
+
+    if operation == "quantile":
+        column = parameters.get("column")
+        q = parameters.get("q", 0.5)
+        _require_columns(frame, column)
+        series = pd.to_numeric(frame[column], errors="coerce").dropna()
+        if series.empty:
+            return None
+        return float(series.quantile(q))
+
+    raise ValueError(f"Unsupported data operation: {operation}")
 
 
 def _require_columns(frame, *columns):

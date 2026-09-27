@@ -69,12 +69,12 @@ TOOL_SCHEMAS = [{
     "type": "function",
     "function": {
         "name": "analyze_data",
-        "description": "Analyze a stored CSV locally or create a modified CSV copy. file_id may be the uploaded file ID or exact filename.",
+        "description": "Analyze a stored CSV locally or create a modified CSV copy. file_id may be the uploaded file ID or exact filename. Supports core pandas-style data operations for analysis, aggregation, filtering, sorting, and summary statistics.",
         "parameters": {
             "type": "object",
             "properties": {
                 "file_id": {"type": "string", "description": "Exact uploaded CSV filename or document ID"},
-                "operation": {"type": "string", "enum": ["summary", "columns", "describe", "head", "tail", "dtypes", "unique_values", "value_counts", "missing_values", "group_mean", "filter", "sort", "create_column"]},
+                "operation": {"type": "string", "enum": ["summary", "columns", "describe", "head", "tail", "dtypes", "unique_values", "value_counts", "missing_values", "group_mean", "group_agg", "filter", "sort", "create_column", "mean", "median", "sum", "min", "max", "count", "std", "corr", "quantile"]},
                 "parameters": {"type": "object"}
             },
             "required": ["file_id", "operation"]

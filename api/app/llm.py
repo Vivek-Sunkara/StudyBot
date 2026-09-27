@@ -102,11 +102,13 @@ class LLM:
         return response.choices[0].message.content or text
 
     def answer(self, question, language, results, executor, schemas,
-               history=None, route="general"):
+               history=None, route="general", data_files=None):
         context = "\n\n".join(
             f"[SOURCE {i}] {x['document']} | page {x['page']}\n{x['content']}"
             for i, x in enumerate(results, 1)
         )
+        if route == "data" and data_files:
+            context = "Available uploaded CSV files: " + ", ".join(data_files) + "\n\n" + context
         route_instruction = {
             "conversation": "Respond naturally as a conversational assistant; do not claim document information was missing.",
             "calculator": "Use the calculate tool for the arithmetic request and explain the result briefly.",

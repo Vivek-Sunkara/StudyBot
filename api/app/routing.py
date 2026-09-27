@@ -27,7 +27,9 @@ VIDEO_RE = re.compile(r"\b(?:video|clip|footage|recording)\b", re.IGNORECASE)
 IMAGE_RE = re.compile(r"\b(?:image|picture|photo|diagram|figure)\b", re.IGNORECASE)
 DATA_RE = re.compile(
     r"\b(?:csv|dataframe|data frame|column(?:s)?|header(?:s)?|row(?:s)?|"
-    r"count|dtype|data type|unique|missing values|describe|head|tail|pandas|dataset)\b",
+    r"count|average|avg|mean|median|sum|total|min(?:imum)?|max(?:imum)?|"
+    r"std(?:dev)?|correlation|quantile|dtype|data type|unique|missing values|"
+    r"describe|head|tail|pandas|dataset)\b",
     re.IGNORECASE,
 )
 

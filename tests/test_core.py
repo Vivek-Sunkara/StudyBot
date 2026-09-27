@@ -1,6 +1,7 @@
 from pathlib import Path
 import tempfile
 from api.app.tools import SafeCalculator, execute_tool
+from api.app.data_tools import analyze_csv
 from api.app.language import detect_script
 from api.app.documents import extract_document
 from api.app.db import Database
@@ -74,6 +75,7 @@ def test_query_routing():
     assert classify_query("Calculate (437/512)*100") == "calculator"
     assert classify_query("What are the column names in results.csv?") == "data"
     assert classify_query("Describe the dataset") == "data"
+    assert classify_query("average of original_bytes") == "data"
 
 def test_document_summary_retrieves_indexed_chunks_without_keyword_overlap():
     assert requests_document_summary("Can you summarize the document?")
@@ -119,3 +121,25 @@ def test_local_data_fallback_reads_csv_columns_without_groq():
         answer = _local_data_fallback("List all column names from results.csv file", db, "English/Latin")
         assert doc_id is not None
         assert "Name" in answer and "Age" in answer and "City" in answer
+
+
+def test_local_data_fallback_calculates_average_for_named_csv_column_without_groq():
+    with tempfile.TemporaryDirectory() as d:
+        db = Database(str(Path(d) / "csv_average.db"))
+        db.create_document("result.csv", ".csv", "document", b"original_bytes\n10\n20\n30\n")
+        answer = _local_data_fallback("can u calculate the average of the original bytes column from the result.csv", db, "English/Latin")
+        assert "20" in answer or "20.0" in answer
+
+
+def test_data_analysis_supports_basic_pandas_operations():
+    csv_bytes = b"team,score,minutes\nA,10,30\nA,15,40\nB,5,20\n"
+
+    assert analyze_csv(csv_bytes, "columns") == ["team", "score", "minutes"]
+    assert analyze_csv(csv_bytes, "mean", {"column": "score"}) == 10.0
+    assert analyze_csv(csv_bytes, "median", {"column": "score"}) == 10.0
+    assert analyze_csv(csv_bytes, "sum", {"column": "score"}) == 30.0
+    assert analyze_csv(csv_bytes, "group_agg", {"by": "team", "column": "score", "agg": "mean"}) == [
+        {"team": "A", "score": 12.5},
+        {"team": "B", "score": 5.0},
+    ]
+    assert analyze_csv(csv_bytes, "sort", {"column": "score", "ascending": False})[0]["score"] == 15
