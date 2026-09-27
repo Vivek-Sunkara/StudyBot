@@ -34,11 +34,9 @@ Copy `.env.example` to `.env` and set `MONGODB_URI` and `MONGODB_DATABASE` for p
 For image descriptions, optionally set `GROQ_VISION_MODEL` (the default is
 `qwen/qwen3.8-27b`).
 
-Install Node dependencies:
+Install Node dependencies from the repository root:
 
-    cd frontend
     npm install
-    cd ..
 
 Run API directly:
 
@@ -65,6 +63,8 @@ asynchronous processing.
 
 SQLite is retained as a local fallback when `MONGODB_URI` is not set. MongoDB stores
 documents, images, videos, and previous chat sessions for deployed environments.
+On Vercel, the SQLite fallback uses `/tmp` and is ephemeral, so configure MongoDB for
+persistent data.
 
 ## Multimodal boundary
 

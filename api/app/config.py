@@ -29,7 +29,10 @@ settings = Settings(
     ).strip(),
     max_upload_mb=max(1, int(os.getenv("MAX_UPLOAD_MB", "4"))),
     top_k=max(1, min(20, int(os.getenv("TOP_K", "5")))),
-    database_path=os.getenv("DATABASE_PATH", "./data/studyrag.db"),
+    database_path=os.getenv(
+        "DATABASE_PATH",
+        "/tmp/studyrag.db" if os.getenv("VERCEL") else "./data/studyrag.db",
+    ),
     mongodb_uri=os.getenv("MONGODB_URI", "").strip(),
     mongodb_database=os.getenv("MONGODB_DATABASE", "studyrag").strip(),
 )

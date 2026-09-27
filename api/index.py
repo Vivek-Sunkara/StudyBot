@@ -1,3 +1,4 @@
+from fastapi.responses import JSONResponse
 import os
 import logging
 import tempfile
@@ -7,6 +8,7 @@ from typing import Optional
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
+from pymongo.errors import PyMongoError
 
 from api.app.config import settings
 from api.app.db import Database, MongoDatabase
@@ -26,6 +28,19 @@ app.add_middleware(
     allow_origins=["*"], allow_credentials=False,
     allow_methods=["*"], allow_headers=["*"]
 )
+
+@app.exception_handler(PyMongoError)
+async def mongodb_error_handler(request, exc):
+    logger.error("MongoDB request failed: %s", exc)
+    return JSONResponse(
+        status_code=503,
+        content={
+            "detail": (
+                "MongoDB is unavailable. Check MONGODB_URI, MongoDB Atlas Network Access, "
+                "and the local network/TLS connection."
+            )
+        },
+    )
 
 db = MongoDatabase(settings.mongodb_uri, settings.mongodb_database) if settings.mongodb_uri else Database(settings.database_path)
 rag = RAG(db, settings.top_k)
