@@ -7,6 +7,7 @@ from api.app.db import Database
 from api.app.rag import RAG
 from api.app.routing import calculator_expression, classify_query, retrieval_query, requests_document_summary
 from api.app.llm import SYSTEM
+from api.index import _local_data_fallback
 
 def test_calculator():
     c = SafeCalculator()
@@ -109,3 +110,12 @@ def test_database_conversation_history():
             {"role": "user", "content": "What is overfitting?"},
             {"role": "assistant", "content": "It is memorization of training data."},
         ]
+
+
+def test_local_data_fallback_reads_csv_columns_without_groq():
+    with tempfile.TemporaryDirectory() as d:
+        db = Database(str(Path(d) / "csv.db"))
+        doc_id = db.create_document("results.csv", ".csv", "document", b"Name,Age,City\nAlice,30,Paris\nBob,25,London\n")
+        answer = _local_data_fallback("List all column names from results.csv file", db, "English/Latin")
+        assert doc_id is not None
+        assert "Name" in answer and "Age" in answer and "City" in answer

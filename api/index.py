@@ -5,6 +5,8 @@ import tempfile
 from pathlib import Path
 from typing import Optional
 
+from api.app.data_tools import analyze_csv
+
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
@@ -71,6 +73,50 @@ class DataAnalysisRequest(BaseModel):
     file_id: str
     operation: str
     parameters: dict = Field(default_factory=dict)
+
+
+def _local_data_fallback(question: str, database, language: str):
+    text = (question or "").lower()
+    csv_docs = [
+        doc for doc in database.list_documents()
+        if (doc.get("file_type") or "").lower() == ".csv" or str(doc.get("filename") or "").lower().endswith(".csv")
+    ]
+    if not csv_docs:
+        return "I could not find any uploaded CSV file to inspect directly."
+
+    target_name = None
+    if ".csv" in text:
+        for doc in csv_docs:
+            filename = str(doc.get("filename") or "").lower()
+            if filename in text or text in filename:
+                target_name = doc["filename"]
+                break
+    if target_name is None:
+        target_name = csv_docs[0]["filename"]
+
+    doc = database.document_info(target_name)
+    if doc is None:
+        return "I could not locate the CSV file in the uploaded study data."
+
+    payload = database.document_bytes(target_name)
+    if not payload:
+        return "The CSV file is present, but its contents are not available for inspection."
+
+    operation = "columns" if any(token in text for token in ["column", "columns", "header", "headers", "field", "fields", "name", "names"]) else "summary"
+    result = analyze_csv(payload, operation)
+
+    if operation == "columns":
+        columns = result if isinstance(result, list) else []
+        if not columns:
+            return "I inspected the CSV, but it does not contain any columns."
+        return "I inspected the uploaded CSV and the columns are: " + ", ".join(columns)
+
+    rows = result.get("rows", 0)
+    cols = result.get("columns", [])
+    if not cols:
+        return "I inspected the uploaded CSV, but it does not contain any usable columns."
+    return f"I inspected the uploaded CSV and found {rows} rows with the following columns: {', '.join(cols)}."
+
 
 @app.get("/api/health")
 def health():
@@ -176,10 +222,11 @@ def chat(req: ChatRequest):
     history = db.get_messages(req.conversation_id) if req.conversation_id else []
     route = classify_query(req.message, bool(history))
     media_kind = requested_media_kind(req.message)
-    results = rag.search(retrieval_query(req.message, history, route),
-                         include_all=requests_document_summary(req.message),
-                         kinds={media_kind} if media_kind else None) \
-        if route not in {"conversation", "calculator"} else []
+    results = [] if route in {"conversation", "calculator", "data"} else rag.search(
+        retrieval_query(req.message, history, route),
+        include_all=requests_document_summary(req.message),
+        kinds={media_kind} if media_kind else None,
+    )
     if llm.enabled:
         try:
             answer, calls = llm.answer(
@@ -192,6 +239,8 @@ def chat(req: ChatRequest):
                 answer = "Hello! I can help you study, explain concepts, and work with your uploaded notes."
             elif route == "calculator":
                 answer = "I could not complete the calculation safely."
+            elif route == "data":
+                answer = _local_data_fallback(req.message, db, lang)
             else:
                 answer = rag.fallback(req.message, results, lang)
             calls = []
@@ -201,6 +250,8 @@ def chat(req: ChatRequest):
             answer, calls = "Calculator requests require a configured language model.", []
         elif route == "conversation":
             answer, calls = "Hello! I can help you study, explain concepts, and work with your uploaded notes.", []
+        elif route == "data":
+            answer, calls = _local_data_fallback(req.message, db, lang), []
         elif route in {"document", "explanation"}:
             answer, calls = rag.fallback(req.message, results, lang), []
         else:
